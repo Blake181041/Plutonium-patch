@@ -13,7 +13,7 @@
     games: `<section class="workspace-view workspace-games" data-workspace="games">
       <div class="games-page plu-page">
         <h1 class="games-page__title plu-page__title">Games</h1>
-        <p class="games-page__subtitle plu-page__subtitle">Browse and play games from multiple sources</p>
+        <p class="games-page__subtitle plu-page__subtitle">Browse and play games from multiple sources (Quality Over Quantity)</p>
         <div class="source-tabs">
           <button class="source-tab active" data-panel="pgcdn">Plutonium-GCDN</button>
           <button class="source-tab" data-panel="lumin">LuminSDK</button>
