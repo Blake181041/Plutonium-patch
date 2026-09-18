@@ -3,6 +3,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "vanilliapxy": "0.3.8"
+    "vanilliapxy": "git+https://github.com/Portal-NetworkDev/VanilliaPXY.git#main"
   }
 }
