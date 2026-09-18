@@ -1,9 +1,0 @@
-name = "plutonium-network"
-compatibility_date = "2026-09-18"
-
-compatibility_flags = [
-  "nodejs_compat",
-  "enable_nodejs_sqlite_module"
-]
-
-pages_build_output_dir = "."
