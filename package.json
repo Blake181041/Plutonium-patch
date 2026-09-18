@@ -1,0 +1,11 @@
+{
+  "name": "plutonium-patch",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "dependencies": {
+    "vanilliapxy": "0.3.8"
+  }
+}
