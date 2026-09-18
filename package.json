@@ -1,0 +1,8 @@
+{
+  "name": "plutonium-patch",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "vanilliapxy": "0.3.8"
+  }
+}
