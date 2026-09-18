@@ -1,8 +1,11 @@
 {
-  "name": "plutonium-patch",
+  "name": "plutonium",
   "private": true,
   "type": "module",
   "dependencies": {
     "vanilliapxy": "0.3.8"
+  },
+  "devDependencies": {
+    "wrangler": "latest"
   }
 }
