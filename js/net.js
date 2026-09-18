@@ -658,7 +658,7 @@ async function switchRelayServer(serverId) {
 const NET_MODE_KEY = 'plu_net_mode'
 const LEGACY_NET_MODE_KEY = 'plu_proxy_engine'
 const LEGACY_NET_MODE_MAP = { uv: 'core', sj: 'runtime', hb: 'remote' }
-const VANILLIA_PROXY_URL = window.location.origin + '/vanillia?url='
+const VANILLIA_ROUTE_URL = window.location.origin + '/vanillia?url='
 const REMOTE_WORKER_URL    = 'https://net.cdn.plutoniumnet.work'
 
 function loadNetMode() {
@@ -888,7 +888,7 @@ window.endRemoteSession = endRemoteSession
 
 function getNetUrl(url) {
   if (selectedNet === 'remote') return url
-  if (selectedNet === 'vanillia') return VANILLIA_PROXY_URL + encodeURIComponent(url)
+  if (selectedNet === 'vanillia') return VANILLIA_ROUTE_URL + encodeURIComponent(url)
   if (selectedNet === 'runtime') {
     if (runtimeReady && runtimeController) return runtimeController.encodeUrl(url)
     return url
@@ -903,7 +903,7 @@ function getRealUrlFromNet(maybeNetUrl) {
   if (selectedNet === 'vanillia') {
     try {
       const absolute = new URL(maybeNetUrl, window.location.origin)
-      if (absolute.href.startsWith(VANILLIA_PROXY_URL)) {
+      if (absolute.href.startsWith(VANILLIA_ROUTE_URL)) {
         return absolute.searchParams.get('url') || maybeNetUrl
       }
     } catch (e) {}
