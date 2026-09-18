@@ -1,3 +1,4 @@
+/*
 (function () {
   'use strict';
   var ua = (navigator.userAgent || '').toLowerCase();
@@ -17,3 +18,4 @@
     if (overlay) overlay.hidden = false;
   }
 })();
+*/
