@@ -117,7 +117,7 @@ Workspace views are injected into the single `index.html` document by
 The site is installable: `manifest.json` (with `img/icon-*.png` icons) plus
 `js/pwa.js`, which registers the root `sw.js` so Chrome offers the install
 prompt; Safari uses the manifest and `img/apple-touch-icon.png` via
-"Add to Home Screen".
+"Add to Home Screen", However, Plutonium does not support mobile devices.
 
 ## Serving locally
 
