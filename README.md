@@ -117,7 +117,7 @@ Workspace views are injected into the single `index.html` document by
 The site is installable: `manifest.json` (with `img/icon-*.png` icons) plus
 `js/pwa.js`, which registers the root `sw.js` so Chrome offers the install
 prompt; Safari uses the manifest and `img/apple-touch-icon.png` via
-"Add to Home Screen".
+"Add to Home Screen", However, Plutonium does not support mobile devices.
 
 ## Serving locally
 
@@ -125,7 +125,3 @@ prompt; Safari uses the manifest and `img/apple-touch-icon.png` via
 npx http-server -p 8090 -a 127.0.0.1 -c-1
 # then open http://127.0.0.1:8090/new/
 ```
-
-## Vanillia server
-
-The Vanillia frontend is static. Its VanilliaPXY backend lives in `server/vanillia/` and can be deployed separately.
