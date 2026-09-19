@@ -1,0 +1,11 @@
+{
+  "name": "plutonium-vanillia-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "vanilliapxy": "git+https://github.com/Portal-NetworkDev/VanilliaPXY.git#main"
+  }
+}
