@@ -178,7 +178,7 @@ async function openHistoryEntry(tabEl, index) {
     await activateRemoteTab(url, tabEl)
     return
   }
-  if (!coreReady || !bridgeReady) await initNetStack()
+  if (typeof initNetStack === 'function' && getNetEngine() !== 'vanillia' && getNetEngine() !== 'remote' && (!coreReady || !bridgeReady)) await initNetStack()
   if (window.Workspaces) Workspaces.deactivate()
   if (pageFrame) pageFrame.style.display = 'none'
 
