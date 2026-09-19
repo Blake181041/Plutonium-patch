@@ -1,8 +1,0 @@
-{
-  "name": "plutonium-patch",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "vanilliapxy": "git+https://github.com/Portal-NetworkDev/VanilliaPXY.git#main"
-  }
-}
