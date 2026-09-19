@@ -125,3 +125,7 @@ prompt; Safari uses the manifest and `img/apple-touch-icon.png` via
 npx http-server -p 8090 -a 127.0.0.1 -c-1
 # then open http://127.0.0.1:8090/new/
 ```
+
+## Vanillia server
+
+The Vanillia frontend is static. Its VanilliaPXY backend lives in `server/vanillia/` and can be deployed separately.
