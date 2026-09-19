@@ -819,9 +819,18 @@ async function initBridge() {
 }
 
 async function initNetStack() {
-  await initCore()
-  await initRuntime()
-  await initBridge()
+  if (selectedNet === 'vanillia' || selectedNet === 'remote') return true
+  if (selectedNet === 'core') {
+    const core = await initCore()
+    if (!core) return false
+    return initBridge()
+  }
+  if (selectedNet === 'runtime') {
+    const runtime = await initRuntime()
+    if (!runtime) return false
+    return initBridge()
+  }
+  return false
 }
 
 async function launchRemoteSession(raw) {
