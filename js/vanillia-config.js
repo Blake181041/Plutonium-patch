@@ -1,0 +1,1 @@
+window.PLUTONIUM_VANILLIA_SERVER = '';
