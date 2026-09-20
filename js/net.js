@@ -217,32 +217,22 @@ function renderRelaySwitcherMenu() {
   if (!list) return
 
   const servers = getConfiguredRelayServers()
-  const items = servers.map(server => {
+
+  list.innerHTML = servers.map(server => {
     const ping = relayPingByServerId.get(server.id)
     const pingLabel = ping && ping.ok ? formatRelayLatency(ping.latency) : ping && !ping.ok ? 'offline' : 'measuring'
-    const pingTier = relayLatencyTier(ping && ping.ok ? ping.latency : null)
     const activeClass = server.id === currentRelayServerId ? ' is-active' : ''
-    const badge = server.id === bestRelayServerId ? '<span class="relay-switcher-badge">Best</span>' : ''
 
     return `
       <button class="relay-switcher-item${activeClass}" type="button" data-relay-server-id="${server.id}">
         <span class="relay-switcher-item-main">
           <span class="relay-switcher-item-icon relay-flag" aria-hidden="true" style="background-image:url('${server.flagSrc || ''}')"></span>
-          <span class="relay-switcher-item-copy">
-            <span class="relay-switcher-item-name">${server.label}</span>
-            <span class="relay-switcher-item-location">${server.location || ''}</span>
-          </span>
+          <span class="relay-switcher-item-name">${server.label}</span>
         </span>
-        <span class="relay-switcher-item-meta">
-          ${badge}
-          ${relaySignalBars(ping && ping.ok ? pingTier.level : -1)}
-          <span class="relay-switcher-ping">${pingLabel}</span>
-        </span>
+        <span class="relay-switcher-ping">${pingLabel}</span>
       </button>
     `
   }).join('')
-
-  list.innerHTML = items
 
   list.querySelectorAll('[data-relay-server-id]').forEach(item => {
     item.addEventListener('click', async event => {
@@ -251,32 +241,6 @@ function renderRelaySwitcherMenu() {
       await switchRelayServer(serverId)
     })
   })
-
-  const stability = document.getElementById('relay-switcher-stability')
-  if (stability) {
-    if (currentRelayStatus === 'ok' && relayLatencyHistory.length >= 2) {
-      const tier = relayLatencyTier(currentRelayLatencyMs)
-      stability.hidden = false
-      stability.innerHTML = `
-        <span class="relay-stability-label">Stability</span>
-        <svg class="relay-stability-spark" viewBox="0 0 96 22" preserveAspectRatio="none">
-          <polyline fill="none" stroke="currentColor" stroke-width="1.5" points="${relaySparklinePath(96, 22)}"/>
-        </svg>
-        <span class="relay-stability-now ${tier.cls}">${formatRelayLatency(currentRelayLatencyMs)}</span>`
-    } else {
-      stability.hidden = true
-    }
-  }
-}
-
-function positionRelaySwitcherMenu() {
-  const shell = _relaySwitcherButton()
-  const menu = _relaySwitcherMenu()
-  if (!shell || !menu) return
-  const rect = shell.getBoundingClientRect()
-  menu.style.top = (rect.bottom + 8) + 'px'
-  menu.style.right = (window.innerWidth - rect.right) + 'px'
-  menu.style.left = 'auto'
 }
 
 function setRelayMenuOpen(open) {
@@ -285,6 +249,7 @@ function setRelayMenuOpen(open) {
   if (!shell || !menu) return
   shell.setAttribute('aria-expanded', open ? 'true' : 'false')
   relayMenuState = open ? 'open' : 'closed'
+  setRelayScrim(open)
 
   window.clearTimeout(relayMenuTimer)
   relayMenuTimer = null
@@ -293,7 +258,6 @@ function setRelayMenuOpen(open) {
 
   if (open) {
     renderRelaySwitcherMenu()
-    positionRelaySwitcherMenu()
     menu.hidden = false
     void menu.offsetHeight
     menu.classList.add('is-open')
@@ -303,6 +267,11 @@ function setRelayMenuOpen(open) {
       menu.hidden = true
     }, 260)
   }
+}
+
+function setRelayScrim(open) {
+  const scrim = document.getElementById('relay-switcher-scrim')
+  if (scrim) scrim.classList.toggle('is-open', !!open)
 }
 
 function showRelaySwitcherMenu() {
@@ -346,19 +315,6 @@ function initRelayUi() {
 
   document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && relayMenuState === 'open') hideRelaySwitcherMenu()
-  })
-
-  window.addEventListener('resize', () => {
-    if (relayMenuState === 'open') positionRelaySwitcherMenu()
-  })
-  window.addEventListener('scroll', () => {
-    if (relayMenuState === 'open') positionRelaySwitcherMenu()
-  }, true)
-
-  const detailsBtn = document.getElementById('relay-menu-details-btn')
-  if (detailsBtn) detailsBtn.addEventListener('click', () => {
-    hideRelaySwitcherMenu()
-    openNetInfoPopup()
   })
 
   updateRelaySwitcherButton()

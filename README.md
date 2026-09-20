@@ -76,12 +76,14 @@ typo would otherwise render as an empty hero).
 ## Shared shell
 
 `index.html` is the browser: chrome tabs (`js/chrome-tabs.js`), toolbar with
-address bar & relay-switcher (`js/net.js`, `js/url.js`, `js/navigation.js`),
+address bar (`js/net.js`, `js/url.js`, `js/navigation.js`),
 bookmarks bar (`js/bookmarks*.js`), home pins (`js/pins.js` — pinned games
 and a VM quick-launch, added from the Games/VMs pages), keyboard shortcuts
 (`js/keyboard.js`), panic/escape page (`js/escape.js`), loading screen
 (`js/loading.js`) and a new-tab page with
-the Plutonium logo, search and home pins (`js/main.js`).
+the Plutonium logo, search, home pins (`js/main.js`), the engine switch and —
+directly beneath it — the relay (wisp) switcher (`js/net.js`), which is hidden
+whenever the Hyperbeam cloud engine is selected.
 
 Workspace views are injected into the single `index.html` document by
 `js/workspaces.js`; `pluto://` URLs are resolved in `js/url.js`.
