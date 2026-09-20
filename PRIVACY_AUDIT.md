@@ -316,6 +316,8 @@ if (relay) out.wispServer = relayMenuState      // ← UI state string, not the 
 
 `relayMenuState` is `'closed'` / `'open'` (the relay switcher menu's visibility), not the selected relay. The read of `plu_relay_server` above it is unused, so the synced `settings` document contains a meaningless `wispServer` value. This appears to contradict `SYNC_AUDIT.md` §4.5, which records wisp persistence as fixed.
 
+**Status:** fixed. `_getSettings()` assigns the stored relay id, which also clears the `ReferenceError` that aborted the rest of the function and silently dropped `onboarded` and `bgImage` from every push.
+
 **Recommended action:** assign the read value (`out.wispServer = relay`) and add a round-trip check.
 
 ---
