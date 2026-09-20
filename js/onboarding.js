@@ -89,6 +89,12 @@
     })
   }
 
+  // Signing in with an account that already has synced preferences means this wizard has nothing
+  // left to ask: the account manager flags it onboarded and we hand straight over to the browser.
+  // Same idea for the theme it just pulled - repaint the controls so they show the real choices.
+  window.addEventListener('plu-onboarded-synced', goHome)
+  window.addEventListener('plu-theme-synced', syncState)
+
 
   function themeState() {
     return window.BrowserThemeState ? BrowserThemeState.loadThemeState() : {}

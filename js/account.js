@@ -269,8 +269,10 @@ class AccountManager {
       const mode = localStorage.getItem('plu_net_mode') || localStorage.getItem('plu_proxy_engine')
       if (mode) out.proxyEngine = mode
       const relay = localStorage.getItem('plu_relay_server') || localStorage.getItem('plu_wisp_server')
-      if (relay) out.wispServer = relayMenuState
-      if (localStorage.getItem('plu_onboarded')) out.onboarded = true
+      if (relay) out.wispServer = relay
+      // `onboarded` rides along with the settings doc so a fresh device can recognise an account
+      // that has already been through onboarding instead of showing the wizard again.
+      if (localStorage.getItem('plu_onboarded') === '1') out.onboarded = true
       try {
         const parsed = JSON.parse(theme || '{}')
         if (parsed.bgImage) out.bgImage = parsed.bgImage
@@ -296,29 +298,85 @@ class AccountManager {
     }
   }
 
+  // Apply a synced theme to the page that is running right now. Writing localStorage is not
+  // enough on its own: the `storage` event only fires in *other* documents, so without the
+  // refresh below a sign-in would leave the current tab on its old palette until a reload.
+  _applyRemoteTheme(doc) {
+    const state = window.BrowserThemeState
+    if (!doc || !state || typeof state.saveThemeState !== 'function') return false
+    let patch = null
+    if (doc.theme) {
+      try {
+        const parsed = JSON.parse(doc.theme)
+        if (parsed && typeof parsed === 'object') patch = parsed
+      } catch (_) {}
+      if (!patch) {
+        // Older documents stored only the mode string rather than the serialized theme state.
+        const mode = String(doc.theme).trim().toLowerCase()
+        if (mode === 'dark' || mode === 'light') patch = { mode }
+      }
+    }
+    if (!patch && doc.bgImage === undefined) return false
+    patch = patch || {}
+    if (doc.bgImage !== undefined) patch.bgImage = doc.bgImage
+    try {
+      const next = state.saveThemeState(patch)
+      // saveThemeState schedules a push; cancel it, nothing changed relative to the cloud copy.
+      if (this._settingsSyncTimer) { clearTimeout(this._settingsSyncTimer); this._settingsSyncTimer = null }
+      if (typeof Theme !== 'undefined' && Theme && typeof Theme.refresh === 'function') Theme.refresh()
+      window.dispatchEvent(new CustomEvent('plu-theme-synced', { detail: next }))
+      return true
+    } catch (e) {
+      console.warn('[Account] Theme apply failed:', e)
+      return false
+    }
+  }
+
   async pullSettings() {
     if (!this.user) return
+    let doc = null
     try {
-      const doc = await PlutoniumStore.getDoc('settings')
-      if (!doc) return
-      const ready = window.BrowserThemeState && window.setNetEngine && window.switchRelayServer
-      if (!ready) {
-        setTimeout(() => this.pullSettings(), 2500)
-        return
-      }
-      if (doc.theme && window.BrowserThemeState.saveThemeState) {
-        try {
-          const parsed = JSON.parse(doc.theme)
-          if (doc.bgImage !== undefined) parsed.bgImage = doc.bgImage
-          window.BrowserThemeState.saveThemeState(parsed)
-        } catch (_) {}
-      }
-      const legacyMode = { uv: 'core', sj: 'runtime', hb: 'remote' }
-      if (doc.proxyEngine) window.setNetEngine(legacyMode[doc.proxyEngine] || doc.proxyEngine)
-      if (doc.wispServer) window.switchRelayServer(doc.wispServer)
-      if (doc.onboarded) localStorage.setItem('plu_onboarded', '1')
+      doc = await PlutoniumStore.getDoc('settings')
     } catch (e) {
       console.warn('[Account] Settings pull failed:', e)
+      return
+    }
+    if (!doc) return
+
+    const hasRemotePrefs = !!(doc.theme || doc.bgImage || doc.proxyEngine || doc.wispServer)
+    const themeApplied   = this._applyRemoteTheme(doc)
+
+    // Net settings only exist on the main app (net.js); on the onboarding page the globals are
+    // missing, so retry that slice alone instead of holding the theme hostage to it.
+    const legacyMode = { uv: 'core', sj: 'runtime', hb: 'remote' }
+    const applyNet = () => {
+      let pending = false
+      if (doc.proxyEngine) {
+        if (typeof window.setNetEngine === 'function') window.setNetEngine(legacyMode[doc.proxyEngine] || doc.proxyEngine)
+        else pending = true
+      }
+      if (doc.wispServer) {
+        const known = typeof getRelayServerById === 'function' ? getRelayServerById(doc.wispServer) : null
+        if (known) {
+          if (typeof window.switchRelayServer === 'function') window.switchRelayServer(doc.wispServer)
+          else pending = true
+        }
+      }
+      return pending
+    }
+    if (applyNet()) {
+      let tries = 0
+      const timer = setInterval(() => {
+        if (!applyNet() || ++tries >= 12) clearInterval(timer)
+      }, 2500)
+    }
+
+    // An explicit `onboarded: false` ("redo onboarding" from another device) wins over
+    // everything else, otherwise synced preferences mean this account is already set up.
+    if (doc.onboarded === false) return
+    if (doc.onboarded === true || hasRemotePrefs || themeApplied) {
+      try { localStorage.setItem('plu_onboarded', '1') } catch (_) {}
+      window.dispatchEvent(new Event('plu-onboarded-synced'))
     }
   }
 

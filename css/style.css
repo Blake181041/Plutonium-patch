@@ -638,6 +638,33 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
   animation-duration:.001s;
 }
 @keyframes plu-autofill-in{from{opacity:1}to{opacity:1}}
+.new-tab-page .online-count{
+  position:relative;z-index:1;
+  display:flex;align-items:center;gap:7px;
+  margin-top:-12px;
+  font-size:13px;color:var(--ui-text-sub);
+  user-select:none;
+}
+.new-tab-page .online-count__dot{
+  width:8px;height:8px;border-radius:50%;
+  background:#3ddc84;
+  box-shadow:0 0 8px rgba(61,220,132,0.8);
+  animation:online-pulse 2s ease-in-out infinite;
+  flex:0 0 auto;
+}
+.new-tab-page .online-count.is-offline .online-count__dot{
+  background:var(--ui-text-muted);
+  box-shadow:none;
+  animation:none;
+}
+.new-tab-page .online-count__value{color:var(--ui-text);font-weight:600;min-width:1ch}
+@keyframes online-pulse{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.55;transform:scale(.82)}
+}
+@media (prefers-reduced-motion:reduce){
+  .new-tab-page .online-count__dot{animation:none}
+}
 .shortcuts{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;max-width:680px}
 .shortcut{
   display:flex;flex-direction:column;align-items:center;gap:8px;
