@@ -867,6 +867,13 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
   transition:color .18s;
 }
 .engine-logo{width:18px;height:18px;object-fit:contain;filter:grayscale(100%)}
+/* Small status pill inside an engine button, same shape as the relay picker's
+   badge. Colour is inherited, so it brightens with the button when active. */
+.engine-badge{
+  border:1px solid var(--ui-border);border-radius:999px;
+  padding:0 5px;font-size:9px;font-weight:600;letter-spacing:.3px;line-height:1.6;
+  opacity:.85;
+}
 .engine-btn:hover{color:var(--ui-text)}
 .engine-btn.active{color:var(--ui-text)}
 .engine-slider{
@@ -1637,7 +1644,8 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
 }
 /* No relay to pick when the cloud (Hyperbeam) engine is active: collapse the row
    and swallow the flex gap on both sides, so everything below slides up into
-   exactly the space the row would have taken. */
+   exactly the space the row would have taken. The VanilliaPXY engine keeps the
+   row visible — it picks that engine's host rather than a wisp relay. */
 .new-tab-page:has(.engine-btn[data-engine="remote"].active) .engine-relay{
   height:0;
   margin-top:0;

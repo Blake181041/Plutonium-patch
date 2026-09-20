@@ -29,6 +29,8 @@ cloud-synced saves) added in.
 | VMs (remote sessions) | `vm.cdn.plutoniumnet.work/session` | `js/vms.js` (Bearer idToken) |
 | Cloud Gaming (cgapi) | `cgapi.cdn.plutoniumnet.work` | `js/cloud.js` (sessions / queue / embed) |
 | Streaming | TMDB + Videasy / VidCore players | `js/stream.js` |
+| Wisp relays (proxied browsing) | `wss://wisp-{us-east,us-west,europe,asia}.plutoniumnet.work` | `js/net.js` (UV / Scramjet engines) |
+| VanilliaPXY engine (proxied browsing) | `vanillia-{us-west,europe}.plutoniumnet.work/vanillia?url=` | `js/net.js` (fourth engine; serves its own service worker) |
 
 All worker calls that need it carry `Authorization: Bearer <Firebase idToken>`
 from `PlutoniumStore` — the AI and VM pages gate on sign-in.
@@ -83,7 +85,9 @@ and a VM quick-launch, added from the Games/VMs pages), keyboard shortcuts
 (`js/loading.js`) and a new-tab page with
 the Plutonium logo, search, home pins (`js/main.js`), the engine switch and —
 directly beneath it — the relay (wisp) switcher (`js/net.js`), which is hidden
-whenever the Hyperbeam cloud engine is selected.
+whenever the Hyperbeam cloud engine is selected, and doubles as the VanilliaPXY
+server picker (`US West` / `Europe`) when that engine is selected — the two
+sources have separate lists, stored choices and latency probes.
 
 Workspace views are injected into the single `index.html` document by
 `js/workspaces.js`; `pluto://` URLs are resolved in `js/url.js`.
@@ -111,8 +115,8 @@ Workspace views are injected into the single `index.html` document by
 
 ## Remaining third-party dependencies (intentional)
 
-- Relay servers: `wss://wisp-*.cgamz.online` (`js/net.js`) — shared infra the
-  old Plutonium site itself used.
+- IP geolocation: `ipapi.co` (`js/net.js`) — approximate location, used to pick
+  the nearest relay region (`getClosestRelayServer()`).
 
 ## PWA
 

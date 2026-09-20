@@ -32,9 +32,10 @@
   ];
 
   const ENGINE_LABELS = {
-    core:    'UV',
-    runtime: 'SJ',
-    remote:  'Hyperbeam',
+    core:      'UV',
+    runtime:   'SJ',
+    remote:    'Hyperbeam',
+    vanillia:  'VanilliaPXY',
   };
 
   let entries       = loadEntries();

@@ -1,26 +1,47 @@
 const RELAY_QUERY_OVERRIDE = new URLSearchParams(window.location.search).get('relay')
-const RELAY_WORKER_BASE = 'https://wisp.cgamz.online'
-const DEFAULT_RELAY_REGION = 'us-east-1'
+
+// Wisp relay infrastructure. Each region is served from its own host, so the
+// list below is the only place that decides where proxied browsing traffic
+// goes: adding a region is a row here plus a matching `wisp-<id>` host. The
+// first row is the fallback when neither geolocation nor ping picks a region.
+const RELAY_URL_TEMPLATE = 'wss://wisp-{id}.plutoniumnet.work/'
+
+// Optional discovery worker: answers `<base>/<region-id>/` with `{ redirect }`
+// (or an `X-Relay-Redirect` header) naming that region's live relay. Left null
+// because the hosts above are static; point it at a worker to let relays move
+// without shipping a client change.
+const RELAY_DISCOVERY_BASE = null
+
 const RELAY_CONNECT_TIMEOUT_MS = 15000
 const RELAY_PING_TIMEOUT_MS = 8000
 const RELAY_BACKGROUND_PING_MS = 5000
 
 const RELAY_SERVERS = [
-  { id: 'us-east-1', label: 'US East 1', location: 'Virginia, USA',     flagSrc: 'img/flags/us.png', lat: 37.4316,  lon: -78.6569  },
-  { id: 'us-east-2', label: 'US East 2', location: 'Ohio, USA',         flagSrc: 'img/flags/us.png', lat: 40.4173,  lon: -82.9071  },
-  { id: 'us-west',   label: 'US West',   location: 'Oregon, USA',       flagSrc: 'img/flags/us.png', lat: 43.8041,  lon: -120.5542 },
-  { id: 'europe',    label: 'Europe',    location: 'Frankfurt, Germany', flagSrc: 'img/flags/eu.png', lat: 50.1109,  lon: 8.6821    },
-  { id: 'asia',      label: 'Asia',      location: 'Singapore',         flagSrc: 'img/flags/sg.png', lat: 1.3521,   lon: 103.8198  },
+  { id: 'us-east', label: 'US East', location: 'Virginia, USA',      flagSrc: 'img/flags/us.png', lat: 37.4316,  lon: -78.6569  },
+  { id: 'us-west', label: 'US West', location: 'Oregon, USA',        flagSrc: 'img/flags/us.png', lat: 43.8041,  lon: -120.5542 },
+  { id: 'europe',  label: 'Europe',  location: 'Frankfurt, Germany', flagSrc: 'img/flags/eu.png', lat: 50.1109,  lon: 8.6821    },
+  { id: 'asia',    label: 'Asia',    location: 'Singapore',          flagSrc: 'img/flags/sg.png', lat: 1.3521,   lon: 103.8198  },
 ]
+
+// VanilliaPXY runs its own regional hosts, and picking one is independent of the
+// wisp relay, so it has its own list, stored choice and probe. Only these two
+// regions exist for Vanillia; `vanillia-europe` needs its DNS record before it
+// answers.
+const VANILLIA_SERVERS = [
+  { id: 'us-west', label: 'US West', location: 'Oregon, USA',        host: 'vanillia-us-west.plutoniumnet.work', flagSrc: 'img/flags/us.png', lat: 43.8041, lon: -120.5542 },
+  { id: 'europe',  label: 'Europe',  location: 'Frankfurt, Germany', host: 'vanillia-europe.plutoniumnet.work',  flagSrc: 'img/flags/eu.png', lat: 50.1109, lon: 8.6821    },
+]
+const VANILLIA_SERVER_KEY = 'plu_vanillia_server'
 
 const resolvedRelayUrlCache = new Map()
 
 async function resolveRelayUrl(serverId) {
   if (RELAY_QUERY_OVERRIDE) return RELAY_QUERY_OVERRIDE
+  if (!RELAY_DISCOVERY_BASE) return null
   if (resolvedRelayUrlCache.has(serverId)) return resolvedRelayUrlCache.get(serverId)
 
   try {
-    const res = await fetch(`${RELAY_WORKER_BASE}/${serverId}/`, { signal: AbortSignal.timeout(4000) })
+    const res = await fetch(`${RELAY_DISCOVERY_BASE}/${serverId}/`, { signal: AbortSignal.timeout(4000) })
     const data = await res.json()
     if (data && data.redirect) {
       resolvedRelayUrlCache.set(serverId, data.redirect)
@@ -44,13 +65,14 @@ function geoDistanceKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-async function getClosestRelayServer() {
+async function getClosestRelayServer(servers = getPickerServers()) {
   try {
     const res = await fetch('https://ipapi.co/json/', { signal: AbortSignal.timeout(3000) })
     const data = await res.json()
     const { latitude, longitude } = data
     if (!latitude || !longitude) return null
-    return getConfiguredRelayServers()
+    if (!servers.length) return null
+    return servers
       .map(s => ({ server: s, dist: geoDistanceKm(latitude, longitude, s.lat, s.lon) }))
       .sort((a, b) => a.dist - b.dist)[0].server
   } catch (e) {
@@ -64,6 +86,7 @@ let bridgeConnection = null
 let pendingInitPromise = null
 let relayPreloadSocket = null
 let currentRelayServerId = RELAY_SERVERS[0] ? RELAY_SERVERS[0].id : ''
+let currentVanilliaServerId = loadVanilliaServerId()
 let currentRelayLatencyMs = null
 let bestRelayServerId = ''
 let currentRelayStatus = 'connecting'
@@ -94,6 +117,65 @@ function getRelayServerById(id) {
 
 function getCurrentRelayServer() {
   return getRelayServerById(currentRelayServerId) || getConfiguredRelayServers()[0] || null
+}
+
+// The row under the engine switch picks the wisp relay for the UV/Scramjet
+// engines and the VanilliaPXY host for the vanillia engine. Everything the
+// picker draws goes through these, so the two choices stay independent: the
+// wisp helpers above always mean the wisp relay.
+function loadVanilliaServerId() {
+  const stored = localStorage.getItem(VANILLIA_SERVER_KEY)
+  if (stored && VANILLIA_SERVERS.some(server => server.id === stored)) return stored
+  return VANILLIA_SERVERS[0] ? VANILLIA_SERVERS[0].id : ''
+}
+
+function isVanilliaEngine() { return selectedNet === 'vanillia' }
+
+function getPickerServers() {
+  return isVanilliaEngine() ? VANILLIA_SERVERS : RELAY_SERVERS
+}
+
+function getPickerServerById(id) {
+  return getPickerServers().find(server => server.id === id) || null
+}
+
+function getPickerServerId() {
+  return isVanilliaEngine() ? currentVanilliaServerId : currentRelayServerId
+}
+
+function getPickerServer() {
+  return getPickerServerById(getPickerServerId()) || getPickerServers()[0] || null
+}
+
+function getPickerNoun() { return isVanilliaEngine() ? 'server' : 'relay' }
+
+function setPickerServerId(id) {
+  if (isVanilliaEngine()) {
+    currentVanilliaServerId = id
+    localStorage.setItem(VANILLIA_SERVER_KEY, id)
+    return
+  }
+  currentRelayServerId = id
+  localStorage.setItem('plu_relay_server', id)
+}
+
+// Ping results are keyed per source: both lists use ids like `europe`, so a
+// shared namespace would let a wisp reading masquerade as a vanillia one.
+function pickerPingKey(id) { return (isVanilliaEngine() ? 'vanillia:' : 'wisp:') + id }
+function wispPingKey(id) { return 'wisp:' + id }
+
+function getVanilliaRouteUrl() {
+  const server = getPickerServerById(currentVanilliaServerId) || VANILLIA_SERVERS[0]
+  return server ? `https://${server.host}/vanillia?url=` : ''
+}
+
+function isVanilliaFrameUrl(raw) {
+  try {
+    const absolute = new URL(raw, window.location.origin)
+    return absolute.pathname === '/vanillia' && VANILLIA_SERVERS.some(server => server.host === absolute.hostname)
+  } catch (e) {
+    return false
+  }
 }
 
 function formatRelayLatency(latencyMs) {
@@ -148,7 +230,7 @@ function relaySignalBars(level) {
 function setRelayStatus(state, details = {}) {
   const bar = _relayBar()
   const label = _relayLabel()
-  const server = details.server || getCurrentRelayServer()
+  const server = details.server || getPickerServer()
   const serverLabel = details.serverLabel || (server ? server.label : 'server')
   const latency = details.latency ?? currentRelayLatencyMs
 
@@ -179,7 +261,7 @@ function updateRelaySwitcherButton() {
   const currentLabel = _relaySwitcherCurrent()
   const currentIcon = _relaySwitcherIcon()
   const latencyEl = _relaySwitcherLatency()
-  const server = getCurrentRelayServer()
+  const server = getPickerServer()
   if (!button || !currentLabel || !currentIcon || !server) return
 
   currentLabel.textContent = server.label
@@ -208,20 +290,20 @@ function updateRelaySwitcherButton() {
     : currentRelayStatus === 'err' ? 'Connection error'
     : currentRelayStatus === 'disconnecting' ? 'Disconnecting'
     : 'Connecting'
-  button.setAttribute('aria-label', `Choose relay: ${server.label}, ${stateWords}`)
-  button.title = `Relay: ${server.label}, ${stateWords}`
+  button.setAttribute('aria-label', `Choose ${getPickerNoun()}: ${server.label}, ${stateWords}`)
+  button.title = `${isVanilliaEngine() ? 'Server' : 'Relay'}: ${server.label}, ${stateWords}`
 }
 
 function renderRelaySwitcherMenu() {
   const list = _relaySwitcherList()
   if (!list) return
 
-  const servers = getConfiguredRelayServers()
+  const servers = getPickerServers()
 
   list.innerHTML = servers.map(server => {
-    const ping = relayPingByServerId.get(server.id)
+    const ping = relayPingByServerId.get(pickerPingKey(server.id))
     const pingLabel = ping && ping.ok ? formatRelayLatency(ping.latency) : ping && !ping.ok ? 'offline' : 'measuring'
-    const activeClass = server.id === currentRelayServerId ? ' is-active' : ''
+    const activeClass = server.id === getPickerServerId() ? ' is-active' : ''
 
     return `
       <button class="relay-switcher-item${activeClass}" type="button" data-relay-server-id="${server.id}">
@@ -328,7 +410,7 @@ async function getRelayUrl(serverId) {
   const id = serverId || currentRelayServerId
   const resolved = await resolveRelayUrl(id)
   if (resolved) return resolved
-  return `wss://wisp-${id}.cgamz.online/`
+  return RELAY_URL_TEMPLATE.replace('{id}', id)
 }
 
 function closeSocket(socket) {
@@ -412,6 +494,30 @@ async function measureRelayServer(server, options = {}) {
   })
 }
 
+// Vanillia hosts answer /health with JSON and `access-control-allow-origin: *`,
+// so a plain cross-origin fetch doubles as a reachability and latency probe.
+async function measureVanilliaServer(server, options = {}) {
+  const timeoutMs = options.timeoutMs || RELAY_PING_TIMEOUT_MS
+  if (!server) return { ok: false, latency: null, server }
+
+  const startedAt = performance.now()
+  try {
+    const res = await fetch(`https://${server.host}/health`, {
+      cache: 'no-store',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (!res.ok) return { ok: false, latency: null, server }
+    return { ok: true, latency: Math.max(1, Math.round(performance.now() - startedAt)), server }
+  } catch (e) {
+    return { ok: false, latency: null, server }
+  }
+}
+
+function measurePickerServer(server, options) {
+  return isVanilliaEngine() ? measureVanilliaServer(server, options) : measureRelayServer(server, options)
+}
+
 async function preloadRelayConnection() {
   const server = getCurrentRelayServer()
   const serverId = server ? server.id : ''
@@ -436,7 +542,7 @@ async function preloadRelayConnection() {
     }
 
     currentRelayLatencyMs = result.latency
-    relayPingByServerId.set(server.id, { ok: true, latency: result.latency })
+    relayPingByServerId.set(wispPingKey(server.id), { ok: true, latency: result.latency })
     relayPreloadSocket = result.socket
     relayPreloadSocket.addEventListener('close', () => {
       if (relayPreloadSocket === result.socket) relayPreloadSocket = null
@@ -470,12 +576,13 @@ async function disconnectCurrentRelayConnection() {
 }
 
 async function pingConfiguredRelayServers() {
-  const servers = getConfiguredRelayServers()
+  const servers = getPickerServers()
   if (!servers.length) return null
 
-  const results = await Promise.all(servers.map(server => measureRelayServer(server)))
+  const results = await Promise.all(servers.map(server => measurePickerServer(server)))
   results.forEach(result => {
-    relayPingByServerId.set(result.server.id, {
+    if (!result.server) return
+    relayPingByServerId.set(pickerPingKey(result.server.id), {
       ok: result.ok,
       latency: result.latency,
     })
@@ -496,13 +603,13 @@ async function refreshRelayPingSnapshot() {
 
   try {
     const best = await pingConfiguredRelayServers()
-    const currentPing = relayPingByServerId.get(currentRelayServerId)
+    const currentPing = relayPingByServerId.get(pickerPingKey(getPickerServerId()))
 
     if (currentPing && currentPing.ok && Number.isFinite(currentPing.latency)) {
       currentRelayLatencyMs = currentPing.latency
       if (currentRelayStatus === 'ok') {
         setRelayStatus('ok', {
-          server: getCurrentRelayServer(),
+          server: getPickerServer(),
           latency: currentPing.latency,
         })
       }
@@ -524,19 +631,26 @@ function startBackgroundRelayPingLoop() {
   }, RELAY_BACKGROUND_PING_MS)
 }
 
-async function chooseBestRelayServer() {
-  const savedServer = localStorage.getItem('plu_relay_server') || localStorage.getItem('plu_wisp_server')
-  if (savedServer && getRelayServerById(savedServer)) {
-    currentRelayServerId = savedServer
+// Picks the server for whichever source the row is showing: the saved choice
+// first, then the nearest by IP, then the fastest responder.
+async function chooseBestPickerServer() {
+  const servers = getPickerServers()
+  if (!servers.length) return null
+
+  const savedServer = isVanilliaEngine()
+    ? localStorage.getItem(VANILLIA_SERVER_KEY)
+    : (localStorage.getItem('plu_relay_server') || localStorage.getItem('plu_wisp_server'))
+  if (savedServer && getPickerServerById(savedServer)) {
+    setPickerServerId(savedServer)
     currentRelayLatencyMs = null
     updateRelaySwitcherButton()
     renderRelaySwitcherMenu()
-    return getRelayServerById(savedServer)
+    return getPickerServerById(savedServer)
   }
 
-  const geo = RELAY_QUERY_OVERRIDE ? null : await getClosestRelayServer()
+  const geo = RELAY_QUERY_OVERRIDE ? null : await getClosestRelayServer(servers)
   if (geo) {
-    currentRelayServerId = geo.id
+    setPickerServerId(geo.id)
     bestRelayServerId = geo.id
     currentRelayLatencyMs = null
     updateRelaySwitcherButton()
@@ -546,17 +660,17 @@ async function chooseBestRelayServer() {
 
   const best = await refreshRelayPingSnapshot()
   if (best && best.server) {
-    currentRelayServerId = best.server.id
+    setPickerServerId(best.server.id)
     currentRelayLatencyMs = best.latency
   } else {
-    const fallback = getConfiguredRelayServers()[0] || null
-    currentRelayServerId = fallback ? fallback.id : ''
+    const fallback = servers[0] || null
+    setPickerServerId(fallback ? fallback.id : '')
     currentRelayLatencyMs = null
   }
 
   updateRelaySwitcherButton()
   renderRelaySwitcherMenu()
-  return getCurrentRelayServer()
+  return getPickerServer()
 }
 
 function currentNetAddress() {
@@ -580,20 +694,39 @@ function reconnectActivePage(url) {
   if (frame) frame.style.display = 'none'
   if (typeof showLoadingScreen === 'function') showLoadingScreen(url)
   if (frame) frame.src = getNetUrl(url)
-  if (statusText) statusText.textContent = `Switching server to ${getCurrentRelayServer().label}...`
+  const pickerServer = getPickerServer()
+  if (statusText) statusText.textContent = `Switching server to ${pickerServer ? pickerServer.label : 'server'}...`
 }
 
 async function switchRelayServer(serverId) {
-  const targetServer = getRelayServerById(serverId)
+  const targetServer = getPickerServerById(serverId)
   if (!targetServer) return false
 
-  const sameServer = targetServer.id === currentRelayServerId
+  const sameServer = targetServer.id === getPickerServerId()
   const pageUrl = currentNetAddress()
 
   hideRelaySwitcherMenu()
-  currentRelayServerId = targetServer.id
-  localStorage.setItem('plu_relay_server', targetServer.id)
-  currentRelayLatencyMs = relayPingByServerId.get(targetServer.id)?.latency ?? null
+
+  // A VanilliaPXY server is picked, not connected: the frame just points at the
+  // other host, so there is no socket, bridge or transport to tear down.
+  if (isVanilliaEngine()) {
+    setPickerServerId(targetServer.id)
+    currentRelayLatencyMs = relayPingByServerId.get(pickerPingKey(targetServer.id))?.latency ?? null
+    updateRelaySwitcherButton()
+    renderRelaySwitcherMenu()
+    refreshConnectionHud()
+    if (sameServer) return true
+
+    const probed = await measureVanilliaServer(targetServer)
+    relayPingByServerId.set(pickerPingKey(targetServer.id), { ok: probed.ok, latency: probed.latency })
+    currentRelayLatencyMs = probed.latency
+    setRelayStatus(probed.ok ? 'ok' : 'err', { server: targetServer, latency: probed.latency })
+    if (pageUrl) reconnectActivePage(pageUrl)
+    return probed.ok
+  }
+
+  setPickerServerId(targetServer.id)
+  currentRelayLatencyMs = relayPingByServerId.get(wispPingKey(targetServer.id))?.latency ?? null
   updateRelaySwitcherButton()
   renderRelaySwitcherMenu()
   if (window.accountManager && typeof window.accountManager.scheduleSettingsSync === 'function') {
@@ -611,9 +744,52 @@ async function switchRelayServer(serverId) {
   return ready
 }
 
+// Changing engine changes which list the row shows, so re-point it and re-probe.
+// The probe is what refreshes the status: the background loop only keeps a
+// status that is already `ok`, so a stale error from the other source would
+// otherwise stick forever.
+let lastPickerSource = ''
+
+function refreshPickerForEngine() {
+  const source = isVanilliaEngine() ? 'vanillia' : 'wisp'
+  if (isVanilliaEngine() && !getPickerServerById(currentVanilliaServerId)) {
+    currentVanilliaServerId = VANILLIA_SERVERS[0] ? VANILLIA_SERVERS[0].id : ''
+  }
+
+  const cached = relayPingByServerId.get(pickerPingKey(getPickerServerId()))
+  currentRelayLatencyMs = cached && Number.isFinite(cached.latency) ? cached.latency : null
+  updateRelaySwitcherButton()
+  renderRelaySwitcherMenu()
+  refreshConnectionHud()
+
+  // Switching UV <-> SJ keeps the same relay, so don't churn its socket.
+  if (source === lastPickerSource) return
+  lastPickerSource = source
+  setRelayStatus('connecting', { server: getPickerServer() })
+  probeCurrentPickerServer()
+}
+
+async function probeCurrentPickerServer() {
+  const server = getPickerServer()
+  if (!server) return
+
+  const result = await measurePickerServer(server)
+  relayPingByServerId.set(pickerPingKey(server.id), { ok: result.ok, latency: result.latency })
+  if (getPickerServerId() !== server.id) return
+
+  currentRelayLatencyMs = result.latency
+  setRelayStatus(result.ok ? 'ok' : 'err', { server, latency: result.latency })
+  updateRelaySwitcherButton()
+  renderRelaySwitcherMenu()
+}
+
 const NET_MODE_KEY = 'plu_net_mode'
 const LEGACY_NET_MODE_KEY = 'plu_proxy_engine'
 const LEGACY_NET_MODE_MAP = { uv: 'core', sj: 'runtime', hb: 'remote' }
+// VanilliaPXY serves a page and injects a runtime that registers its own
+// service worker (`/service-worker.js?target=`) on that origin, so the app only
+// has to build the frame URL — no local SW, relay or bridge is involved. Which
+// host that URL names comes from the server picked in the switcher.
 const REMOTE_WORKER_URL    = 'https://net.cdn.plutoniumnet.work'
 
 function loadNetMode() {
@@ -633,7 +809,7 @@ let currentRemoteTargetUrl = null
 function getNetEngine() { return selectedNet }
 
 function setNetEngine(engine) {
-  if (!['core', 'runtime', 'remote'].includes(engine)) return
+  if (!['core', 'runtime', 'remote', 'vanillia'].includes(engine)) return
   const previous = selectedNet
   selectedNet = engine
   localStorage.setItem(NET_MODE_KEY, engine)
@@ -644,6 +820,7 @@ function setNetEngine(engine) {
   if (engine === 'remote') {
     return
   }
+  refreshPickerForEngine()
   if (previous === 'remote' && typeof endRemoteSession === 'function') endRemoteSession()
   const pageUrl = currentNetAddress()
   if (pageUrl) reconnectActivePage(pageUrl)
@@ -775,6 +952,9 @@ async function initBridge() {
 async function initNetStack() {
   await initCore()
   await initRuntime()
+  // VanilliaPXY is a host of its own: it needs no BareMux transport and no wisp
+  // relay, and skipping the bridge keeps its connection status truthful.
+  if (getNetEngine() === 'vanillia') return
   await initBridge()
 }
 
@@ -843,6 +1023,7 @@ window.endRemoteSession = endRemoteSession
 
 function getNetUrl(url) {
   if (selectedNet === 'remote') return url
+  if (selectedNet === 'vanillia') return getVanilliaRouteUrl() + encodeURIComponent(url)
   if (selectedNet === 'runtime') {
     if (runtimeReady && runtimeController) return runtimeController.encodeUrl(url)
     return url
@@ -853,6 +1034,17 @@ function getNetUrl(url) {
 
 function getRealUrlFromNet(maybeNetUrl) {
   if (currentRemoteTargetUrl) return currentRemoteTargetUrl
+
+  if (selectedNet === 'vanillia') {
+    // Any vanillia host decodes, not just the selected one: a frame loaded before
+    // a server switch is still a valid target URL.
+    if (isVanilliaFrameUrl(maybeNetUrl)) {
+      try {
+        return new URL(maybeNetUrl, window.location.origin).searchParams.get('url') || maybeNetUrl
+      } catch (e) {}
+    }
+    return maybeNetUrl
+  }
 
   if (selectedNet === 'runtime' && runtimeReady && runtimeController) {
     try {
@@ -873,7 +1065,7 @@ function getRealUrlFromNet(maybeNetUrl) {
 }
 
 function getRelayConnectionSummary() {
-  const server = getCurrentRelayServer()
+  const server = getPickerServer()
   return {
     id: server ? server.id : '',
     label: server ? server.label : 'Unknown',
@@ -895,6 +1087,7 @@ function openNetInfoPopup() {
 function currentEngineLabel() {
   return selectedNet === 'runtime' ? 'SJ'
     : selectedNet === 'remote' ? 'Hyperbeam'
+    : selectedNet === 'vanillia' ? 'VanilliaPXY'
     : 'UV'
 }
 
@@ -903,7 +1096,7 @@ function renderConnectionHud() {
   const regionsEl = document.getElementById('conn-hud-regions')
   if (!currentEl || !regionsEl) return
 
-  const server = getCurrentRelayServer()
+  const server = getPickerServer()
   const tier = relayLatencyTier(currentRelayLatencyMs)
   const stateLabel = currentRelayStatus === 'ok' ? `Connected · ${formatRelayLatency(currentRelayLatencyMs)}`
     : currentRelayStatus === 'err' ? "Couldn't connect"
@@ -932,13 +1125,13 @@ function renderConnectionHud() {
       ${spark ? `<div class="conn-hud-spark-wrap ${tier.cls}"><span>Latency trend</span>${spark}</div>` : ''}
     </div>`
 
-  const servers = getConfiguredRelayServers()
+  const servers = getPickerServers()
   regionsEl.innerHTML = servers.map(s => {
-    const ping = relayPingByServerId.get(s.id)
+    const ping = relayPingByServerId.get(pickerPingKey(s.id))
     const pingOk = ping && ping.ok
     const pingTier = relayLatencyTier(pingOk ? ping.latency : null)
     const pingLabel = pingOk ? formatRelayLatency(ping.latency) : ping && !ping.ok ? 'offline' : 'measuring'
-    const active = s.id === currentRelayServerId
+    const active = s.id === getPickerServerId()
     const badge = s.id === bestRelayServerId ? '<span class="relay-switcher-badge">Best</span>' : ''
     return `
       <button class="conn-hud-region${active ? ' is-active' : ''}" type="button" data-conn-region="${s.id}">
@@ -954,7 +1147,7 @@ function renderConnectionHud() {
   regionsEl.querySelectorAll('[data-conn-region]').forEach(item => {
     item.addEventListener('click', async () => {
       const id = item.getAttribute('data-conn-region')
-      if (!id || id === currentRelayServerId) return
+      if (!id || id === getPickerServerId()) return
       await switchRelayServer(id)
       renderConnectionHud()
     })
@@ -973,8 +1166,16 @@ function closeNetInfoPopup() {
 
 async function runNetInit() {
   try {
-    await chooseBestRelayServer()
-    await preloadRelayConnection()
+    await chooseBestPickerServer()
+    lastPickerSource = isVanilliaEngine() ? 'vanillia' : 'wisp'
+    if (isVanilliaEngine()) {
+      // Nothing to preload: the vanillia host is probed over HTTP instead.
+      updateRelaySwitcherButton()
+      renderRelaySwitcherMenu()
+      probeCurrentPickerServer()
+    } else {
+      await preloadRelayConnection()
+    }
     await initNetStack()
     startBackgroundRelayPingLoop()
   } catch (_) {}
