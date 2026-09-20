@@ -19,6 +19,13 @@
   const SAVE_RETRY_DELAY = 15000;
   const SAVE_MAX_CHARS = 900000;
 
+  /* How long a launched game gets to announce itself. PluStore says
+     `plu_text_ready` while its own file loads — before any player script — so
+     a page that stays quiet is not running the current bridge at all, which is
+     exactly what a games CDN serving an older js/plustore.js looks like.
+     Silence is a fault to report, never a game with nothing to save. */
+  const READY_TIMEOUT = 12000;
+
   /* A document with no blocks is a build that has not saved anything yet, not a
      save worth storing — the same guard the old bridge put on an empty key
      list. */
@@ -45,6 +52,8 @@
   let saveWriteTimer = null;
   let badgeFlashTimer = null;
   let closeFrameTimer = null;
+  let readyTimer = null;
+  let silentNoticed = false;
 
   const els = {};
 
@@ -174,7 +183,7 @@
   function saveStateFor(gameId) {
     let st = saveState.get(gameId);
     if (!st) {
-      st = { sig: '', retryAfter: 0 };
+      st = { sig: '', retryAfter: 0, ready: false, silent: false };
       saveState.set(gameId, st);
     }
     return st;
@@ -263,6 +272,35 @@
     }
   }
 
+  /* Arm the announcement watch for a game that is about to load, and cancel it
+     the moment the game speaks. Cancelling is the only outcome that means the
+     two halves are talking. */
+  function watchForGameReady(gameId) {
+    clearTimeout(readyTimer);
+    readyTimer = null;
+    if (!gameId) return;
+    if (typeof PlutoniumStore === 'undefined' || !PlutoniumStore.currentUser) return;
+    readyTimer = setTimeout(() => {
+      readyTimer = null;
+      const st = saveStateFor(gameId);
+      if (st.ready) return;
+      st.silent = true;
+      console.warn('[games] "' + gameId + '" never reported its save store. Its page is ' +
+        'not running the current js/plustore.js, so nothing it saves can reach the cloud. ' +
+        'A games CDN serving an older build is the usual cause.');
+      renderSaveChip(true);
+      if (!silentNoticed) {
+        silentNoticed = true;
+        showToast('Saves are not syncing for this game \u2014 its page is not reporting saves', [], 4200);
+      }
+    }, READY_TIMEOUT);
+  }
+
+  function cancelReadyWatch() {
+    clearTimeout(readyTimer);
+    readyTimer = null;
+  }
+
   function showRestoreOverlay() {
     if (els['game-restore-overlay']) els['game-restore-overlay'].classList.add('active');
   }
@@ -308,6 +346,12 @@
     const ownerId = syncGameId || closingGameId;
 
     if (e.data.type === 'plu_text_ready') {
+      if (ownerId) {
+        const st = saveStateFor(ownerId);
+        st.ready = true;
+        st.silent = false;
+      }
+      cancelReadyWatch();
       pushPendingDocument();
       setTimeout(requestSaveSnapshot, 1000);
     } else if (e.data.type === 'plu_text_data' && ownerId) {
@@ -951,6 +995,11 @@
                title: 'Uploading your save to the cloud' };
     }
     const st = syncGameId ? saveStateFor(syncGameId) : null;
+    if (st && st.silent) {
+      return { mode: 'retry', icon: 'fa-solid fa-cloud-slash', label: 'No save sync',
+               title: 'This game never reported a save store, so nothing can sync. ' +
+                      'It is usually a games CDN serving an older js/plustore.js.' };
+    }
     if (st && st.retryAfter && Date.now() < st.retryAfter) {
       return { mode: 'retry', icon: 'fa-solid fa-triangle-exclamation', label: 'Retry sync',
                title: 'Last sync failed. Click to retry now.' };
@@ -992,6 +1041,9 @@
   async function launchGame(game, autostart) {
     cancelFrameRelease();
     syncGameId = game.id;
+    const st = saveStateFor(game.id);
+    st.ready = false;
+    st.silent = false;
     recordPlay(game);
     if (typeof accountManager !== 'undefined' && accountManager.recordRecent) {
       accountManager.recordRecent({ type: 'game', title: game.name, href: 'pluto://games#' + encodeURIComponent(game.id) })
@@ -1145,6 +1197,7 @@
       if (els['game-corner-logo']) els['game-corner-logo'].classList.add('visible');
       els['game-iframe'].src = pendingGameUrl;
       els['game-iframe'].classList.add('entering');
+      watchForGameReady(syncGameId);
       startSessionTimer();
       renderSaveChip(true);
       showBar();
@@ -1154,6 +1207,7 @@
   function releaseGameFrame() {
     clearTimeout(closeFrameTimer);
     closeFrameTimer = null;
+    cancelReadyWatch();
     closingGameId = null;
     if (els['game-iframe']) {
       els['game-iframe'].src = '';
@@ -1236,6 +1290,7 @@
     if (gameBackBtn) gameBackBtn.addEventListener('click', closeViewer);
     $('vbtn-reload').addEventListener('click', () => {
       if (els['game-iframe']) els['game-iframe'].src = els['game-iframe'].src;
+      watchForGameReady(syncGameId);
     });
     $('vbtn-fullscreen').addEventListener('click', () => {
       const iframe = els['game-iframe'];
