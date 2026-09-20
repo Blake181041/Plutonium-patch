@@ -12,7 +12,6 @@
   const GRID_MIN = 300;
   const GRID_GAP = 18;
 
-  const IDB_KEY = '__plu_idb__';
   const SAVE_DOC_PREFIX = 'game_saves/';
 
   const SAVE_WRITE_DELAY = 1200;
@@ -20,11 +19,16 @@
   const SAVE_RETRY_DELAY = 15000;
   const SAVE_MAX_CHARS = 900000;
 
+  /* A document with no blocks is a build that has not saved anything yet, not a
+     save worth storing — the same guard the old bridge put on an empty key
+     list. */
+  const SAVE_BLOCK = /^@/m;
+
   let games = [];
   let filteredGames = [];
   let data = { recent: [] };
   let knownSaves = null;
-  let pendingSaves = null;
+  let pendingDoc = null;
   let syncGameId = null;
   let closingGameId = null;
   let currentGame = null;
@@ -152,19 +156,28 @@
     renderHistory();
   }
 
+  /* ── Cloud save sync ────────────────────────────────────────────────────
+     A game's save is one text document (PluStore, js/plustore.js) and this
+     shell is the only party that can reach the network, so the two talk in
+     text over postMessage:
+
+        game  -> shell   { plu: true, type: 'plu_text_ready' }
+                         { plu: true, type: 'plu_text_data', doc: '<text>' }
+        shell -> game    { plu: true, type: 'plu_text_restore', doc: '<text>' }
+                         { plu: true, type: 'plu_text_request' }
+
+     Each game's document is one cloud record keyed by its id, so what is
+     stored is exactly what the game wrote — no key list, no IndexedDB blobs,
+     and nothing to translate between engines.
+  ─────────────────────────────────────────────────────────────────────── */
+
   function saveStateFor(gameId) {
     let st = saveState.get(gameId);
     if (!st) {
-      st = { sig: '', idb: null, retryAfter: 0 };
+      st = { sig: '', retryAfter: 0 };
       saveState.set(gameId, st);
     }
     return st;
-  }
-
-  function idbBlobOf(saves) {
-    if (!saves || typeof saves !== 'object') return null;
-    const blob = saves[IDB_KEY];
-    return typeof blob === 'string' && blob.length ? blob : null;
   }
 
   function scheduleSaveWrite() {
@@ -172,22 +185,16 @@
     saveWriteTimer = setTimeout(flushSaveWrites, SAVE_WRITE_DELAY);
   }
 
-  async function onSaveData(gameId, saves) {
+  async function onSaveDocument(gameId, doc) {
     if (typeof PlutoniumStore === 'undefined' || !PlutoniumStore.currentUser) return;
-    if (!gameId || !saves || typeof saves !== 'object') return;
-    if (!Object.keys(saves).length) return;
+    if (!gameId || typeof doc !== 'string' || !doc) return;
+    if (!SAVE_BLOCK.test(doc)) return;
 
     const st = saveStateFor(gameId);
     if (Date.now() < st.retryAfter) return;
+    if (doc === st.sig) return;
 
-    const fresh = idbBlobOf(saves);
-    if (fresh) st.idb = fresh;
-    else if (st.idb) saves[IDB_KEY] = st.idb;
-
-    const sig = JSON.stringify(saves);
-    if (sig === st.sig) return;
-
-    saveQueue.set(gameId, { saves, sig });
+    saveQueue.set(gameId, doc);
     scheduleSaveWrite();
     renderSaveChip();
   }
@@ -197,26 +204,25 @@
     const jobs = Array.from(saveQueue.entries());
     saveQueue.clear();
 
-    for (const [gameId, job] of jobs) {
+    for (const [gameId, doc] of jobs) {
       const st = saveStateFor(gameId);
-      const payload = JSON.stringify(job.saves);
 
-      if (payload.length > SAVE_MAX_CHARS) {
-        st.sig = job.sig;
+      if (doc.length > SAVE_MAX_CHARS) {
+        st.sig = doc;
         if (!oversizeWarned.has(gameId)) {
           oversizeWarned.add(gameId);
           console.warn('[games] save for "' + gameId + '" is ' +
-            Math.round(payload.length / 1024) + ' KB and exceeds the store limit; not persisted.');
+            Math.round(doc.length / 1024) + ' KB and exceeds the store limit; not persisted.');
         }
         continue;
       }
 
       try {
         await PlutoniumStore.setDoc(SAVE_DOC_PREFIX + gameId, {
-          saves: payload,
+          doc,
           updatedAt: Date.now()
         });
-        st.sig = job.sig;
+        st.sig = doc;
         st.retryAfter = 0;
         lastSaveAt = Date.now();
         flashBadge('Saved');
@@ -234,20 +240,19 @@
     }
   }
 
-  async function prefetchGameSaves(gameId) {
-    pendingSaves = null;
+  async function prefetchGameDocument(gameId) {
+    pendingDoc = null;
     if (typeof PlutoniumStore === 'undefined' || !PlutoniumStore.currentUser) return;
     if (!gameId || (knownSaves && !knownSaves.has(gameId))) return;
     showRestoreOverlay();
     try {
-      const doc = await PlutoniumStore.getDoc(SAVE_DOC_PREFIX + gameId);
-      if (doc && doc.saves) {
-        const parsed = JSON.parse(doc.saves);
-        pendingSaves = parsed;
+      const record = await PlutoniumStore.getDoc(SAVE_DOC_PREFIX + gameId);
+      const doc = record && typeof record.doc === 'string' ? record.doc : '';
+      if (doc) {
+        pendingDoc = doc;
 
         const st = saveStateFor(gameId);
-        st.sig = JSON.stringify(parsed);
-        st.idb = idbBlobOf(parsed) || st.idb;
+        st.sig = doc;
 
         if (knownSaves) knownSaves.add(gameId);
       }
@@ -282,16 +287,16 @@
     return true;
   }
 
-  function pushPendingSaves() {
-    if (!pendingSaves) return;
-    const saves = pendingSaves;
-    pendingSaves = null;
-    postToGame({ plu: true, type: 'plu_sync_restore', saves });
+  function pushPendingDocument() {
+    if (!pendingDoc) return;
+    const doc = pendingDoc;
+    pendingDoc = null;
+    postToGame({ plu: true, type: 'plu_text_restore', doc });
   }
 
   function requestSaveSnapshot() {
     if (!syncGameId && !closingGameId) return;
-    postToGame({ plu: true, type: 'plu_sync_request' });
+    postToGame({ plu: true, type: 'plu_text_request' });
   }
 
   window.addEventListener('message', e => {
@@ -302,11 +307,11 @@
 
     const ownerId = syncGameId || closingGameId;
 
-    if (e.data.type === 'plu_sync_ready') {
-      pushPendingSaves();
+    if (e.data.type === 'plu_text_ready') {
+      pushPendingDocument();
       setTimeout(requestSaveSnapshot, 1000);
-    } else if (e.data.type === 'plu_sync_data' && ownerId) {
-      onSaveData(ownerId, e.data.saves);
+    } else if (e.data.type === 'plu_text_data' && ownerId) {
+      onSaveDocument(ownerId, e.data.doc);
     }
   });
 
@@ -991,7 +996,7 @@
     if (typeof accountManager !== 'undefined' && accountManager.recordRecent) {
       accountManager.recordRecent({ type: 'game', title: game.name, href: 'pluto://games#' + encodeURIComponent(game.id) })
     }
-    await prefetchGameSaves(game.id);
+    await prefetchGameDocument(game.id);
     openViewer(PGCDN_BASE + '/' + game.path, game.name, game);
     if (autostart) startLaunch();
   }
