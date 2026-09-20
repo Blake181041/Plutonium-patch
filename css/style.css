@@ -1621,7 +1621,8 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
 }
 .search-suggest[hidden]{display:none !important}
 .engine-switch,
-.shortcuts{
+.shortcuts,
+.online-count{
   transition:opacity .18s ease, visibility 0s linear 0s;
 }
 .engine-switch{
@@ -1629,7 +1630,8 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
     width .28s cubic-bezier(.22,1,.36,1), transform .28s cubic-bezier(.22,1,.36,1);
 }
 .new-tab-page.search-suggest-open .engine-switch,
-.new-tab-page.search-suggest-open .shortcuts{
+.new-tab-page.search-suggest-open .shortcuts,
+.new-tab-page.search-suggest-open .online-count{
   opacity:0;
   visibility:hidden;
   transition:opacity .18s ease, visibility 0s linear .18s;
