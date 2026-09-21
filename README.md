@@ -30,7 +30,7 @@ cloud-synced saves) added in.
 | Cloud Gaming (cgapi) | `cgapi.cdn.plutoniumnet.work` | `js/cloud.js` (sessions / queue / embed) |
 | Streaming | TMDB + Videasy / VidCore players | `js/stream.js` |
 | Wisp relays (proxied browsing) | `wss://wisp-{us-east,us-west,europe,asia}.plutoniumnet.work` | `js/net.js` (UV / Scramjet engines) |
-| VanilliaPXY engine (proxied browsing) | `vanillia-{us-west,europe}.plutoniumnet.work/vanillia?url=` | `js/net.js` (fourth engine; serves its own service worker) |
+| VanilliaPXY engine (proxied browsing) | `vanillia-{vercel,us-west,europe}.plutoniumnet.work/vanillia?url=` | `js/net.js` (fourth engine; serves its own service worker) |
 
 All worker calls that need it carry `Authorization: Bearer <Firebase idToken>`
 from `PlutoniumStore` — the AI and VM pages gate on sign-in.
@@ -86,8 +86,11 @@ and a VM quick-launch, added from the Games/VMs pages), keyboard shortcuts
 the Plutonium logo, search, home pins (`js/main.js`), the engine switch and —
 directly beneath it — the relay (wisp) switcher (`js/net.js`), which is hidden
 whenever the Hyperbeam cloud engine is selected, and doubles as the VanilliaPXY
-server picker (`US West` / `Europe`) when that engine is selected — the two
-sources have separate lists, stored choices and latency probes.
+server picker (`Vercel` / `US West` / `Europe`) when that engine is selected —
+the two sources have separate lists, stored choices and latency probes. Vercel
+fronts every region, so it is the default VanilliaPXY host: that pick skips both
+the IP lookup and the ping race, which only decide the wisp relay, and a manual
+pick is the one thing that overrides it.
 
 Workspace views are injected into the single `index.html` document by
 `js/workspaces.js`; `pluto://` URLs are resolved in `js/url.js`.

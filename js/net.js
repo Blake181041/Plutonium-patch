@@ -23,13 +23,16 @@ const RELAY_SERVERS = [
   { id: 'asia',    label: 'Asia',    location: 'Singapore',          flagSrc: 'img/flags/sg.png', lat: 1.3521,   lon: 103.8198  },
 ]
 
-// VanilliaPXY runs its own regional hosts, and picking one is independent of the
-// wisp relay, so it has its own list, stored choice and probe. Only these two
-// regions exist for Vanillia; `vanillia-europe` needs its DNS record before it
-// answers.
+// VanilliaPXY runs its own hosts, and picking one is independent of the wisp
+// relay, so it has its own list, stored choice and probe. `preferred: true`
+// marks the host the app picks on its own: Vercel fronts every region, so it
+// wins outright rather than racing the IP lookup and ping that decide a wisp
+// relay. No row here carries coordinates, because this source is never picked
+// by distance. `vanillia-europe` needs its DNS record before it answers.
 const VANILLIA_SERVERS = [
-  { id: 'us-west', label: 'US West', location: 'Oregon, USA',        host: 'vanillia-us-west.plutoniumnet.work', flagSrc: 'img/flags/us.png', lat: 43.8041, lon: -120.5542 },
-  { id: 'europe',  label: 'Europe',  location: 'Frankfurt, Germany', host: 'vanillia-europe.plutoniumnet.work',  flagSrc: 'img/flags/eu.png', lat: 50.1109, lon: 8.6821    },
+  { id: 'vercel',  label: 'Vercel',  location: 'Global CDN',         host: 'vanillia-vercel.plutoniumnet.work',  flagSrc: 'img/3rd-party/vercel.png', preferred: true },
+  { id: 'us-west', label: 'US West', location: 'Oregon, USA',        host: 'vanillia-us-west.plutoniumnet.work', flagSrc: 'img/flags/us.png' },
+  { id: 'europe',  label: 'Europe',  location: 'Frankfurt, Germany', host: 'vanillia-europe.plutoniumnet.work',  flagSrc: 'img/flags/eu.png' },
 ]
 const VANILLIA_SERVER_KEY = 'plu_vanillia_server'
 
@@ -126,8 +129,17 @@ function getCurrentRelayServer() {
 function loadVanilliaServerId() {
   const stored = localStorage.getItem(VANILLIA_SERVER_KEY)
   if (stored && VANILLIA_SERVERS.some(server => server.id === stored)) return stored
-  return VANILLIA_SERVERS[0] ? VANILLIA_SERVERS[0].id : ''
+  const fallback = getDefaultVanilliaServer()
+  return fallback ? fallback.id : ''
 }
+
+// The row the app falls back to within a source: `preferred` when the source
+// marks one, otherwise the first row (the wisp relay's documented fallback).
+function getPreferredPickerServer(servers = getPickerServers()) {
+  return servers.find(server => server.preferred) || servers[0] || null
+}
+
+function getDefaultVanilliaServer() { return getPreferredPickerServer(VANILLIA_SERVERS) }
 
 function isVanilliaEngine() { return selectedNet === 'vanillia' }
 
@@ -165,7 +177,7 @@ function pickerPingKey(id) { return (isVanilliaEngine() ? 'vanillia:' : 'wisp:')
 function wispPingKey(id) { return 'wisp:' + id }
 
 function getVanilliaRouteUrl() {
-  const server = getPickerServerById(currentVanilliaServerId) || VANILLIA_SERVERS[0]
+  const server = getPickerServerById(currentVanilliaServerId) || getDefaultVanilliaServer()
   return server ? `https://${server.host}/vanillia?url=` : ''
 }
 
@@ -309,7 +321,10 @@ function renderRelaySwitcherMenu() {
       <button class="relay-switcher-item${activeClass}" type="button" data-relay-server-id="${server.id}">
         <span class="relay-switcher-item-main">
           <span class="relay-switcher-item-icon relay-flag" aria-hidden="true" style="background-image:url('${server.flagSrc || ''}')"></span>
-          <span class="relay-switcher-item-name">${server.label}</span>
+          <span class="relay-switcher-item-copy">
+            <span class="relay-switcher-item-name">${server.label}</span>
+            <span class="relay-switcher-item-location">${server.location || ''}</span>
+          </span>
         </span>
         <span class="relay-switcher-ping">${pingLabel}</span>
       </button>
@@ -592,7 +607,13 @@ async function pingConfiguredRelayServers() {
     .filter(result => result.ok && Number.isFinite(result.latency))
     .sort((a, b) => a.latency - b.latency)[0] || null
 
-  bestRelayServerId = best ? best.server.id : ''
+  // The HUD badge marks the row the picker itself would land on. A source with
+  // a preferred row keeps it there rather than on whichever host answered
+  // fastest, because that source is never chosen by a ping race.
+  const preferred = getPreferredPickerServer(servers)
+  bestRelayServerId = preferred && preferred.preferred
+    ? preferred.id
+    : (best ? best.server.id : '')
   renderRelaySwitcherMenu()
   return best
 }
@@ -632,7 +653,8 @@ function startBackgroundRelayPingLoop() {
 }
 
 // Picks the server for whichever source the row is showing: the saved choice
-// first, then the nearest by IP, then the fastest responder.
+// first, then the source's preferred row, then the nearest by IP, then the
+// fastest responder.
 async function chooseBestPickerServer() {
   const servers = getPickerServers()
   if (!servers.length) return null
@@ -646,6 +668,21 @@ async function chooseBestPickerServer() {
     updateRelaySwitcherButton()
     renderRelaySwitcherMenu()
     return getPickerServerById(savedServer)
+  }
+
+  // A source with a preferred row is settled here, before any network work:
+  // VanilliaPXY is fronted by Vercel worldwide, so neither the IP lookup nor a
+  // ping race could improve on it, and either could quietly pick a regional
+  // host instead. Nothing is measured here — the probe that follows fills in
+  // the latency shown next to the row.
+  const preferred = getPreferredPickerServer(servers)
+  if (preferred && preferred.preferred) {
+    setPickerServerId(preferred.id)
+    bestRelayServerId = preferred.id
+    currentRelayLatencyMs = null
+    updateRelaySwitcherButton()
+    renderRelaySwitcherMenu()
+    return preferred
   }
 
   const geo = RELAY_QUERY_OVERRIDE ? null : await getClosestRelayServer(servers)
@@ -663,7 +700,7 @@ async function chooseBestPickerServer() {
     setPickerServerId(best.server.id)
     currentRelayLatencyMs = best.latency
   } else {
-    const fallback = servers[0] || null
+    const fallback = getPreferredPickerServer(servers)
     setPickerServerId(fallback ? fallback.id : '')
     currentRelayLatencyMs = null
   }
@@ -753,7 +790,8 @@ let lastPickerSource = ''
 function refreshPickerForEngine() {
   const source = isVanilliaEngine() ? 'vanillia' : 'wisp'
   if (isVanilliaEngine() && !getPickerServerById(currentVanilliaServerId)) {
-    currentVanilliaServerId = VANILLIA_SERVERS[0] ? VANILLIA_SERVERS[0].id : ''
+    const fallback = getDefaultVanilliaServer()
+    currentVanilliaServerId = fallback ? fallback.id : ''
   }
 
   const cached = relayPingByServerId.get(pickerPingKey(getPickerServerId()))

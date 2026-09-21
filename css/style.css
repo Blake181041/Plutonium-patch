@@ -457,12 +457,20 @@ html,body{height:100%;background:transparent;font-family:-apple-system,BlinkMacS
 .relay-switcher-item:active{transform:scale(0.99)}
 .relay-switcher-item.is-active{background:var(--ui-hover);color:var(--ui-text)}
 .relay-switcher-item-main{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.relay-switcher-item-copy{display:flex;flex-direction:column;min-width:0;flex:1}
 .relay-switcher-item-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Where the region runs, under its name — same second line the connection HUD
+   rows use, so a relay and a Vanillia host read alike. */
+.relay-switcher-item-location{
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--ui-text-muted);font-size:10px;font-weight:500;line-height:1.2;margin-top:1px;
+}
 .relay-switcher-ping{
   flex-shrink:0;color:var(--ui-text-muted);font-size:12px;font-weight:500;
   font-variant-numeric:tabular-nums;
 }
-.relay-switcher-item.is-active .relay-switcher-ping{color:var(--ui-text-sub)}
+.relay-switcher-item.is-active .relay-switcher-ping,
+.relay-switcher-item.is-active .relay-switcher-item-location{color:var(--ui-text-sub)}
 /* Still shared with the connection HUD (net-info overlay) */
 .relay-switcher-item-icon{width:18px;text-align:center;font-size:14px;line-height:1;flex-shrink:0}
 .relay-switcher-badge{border:1px solid var(--ui-border);border-radius:999px;padding:2px 7px;font-size:10px;letter-spacing:.2px}
