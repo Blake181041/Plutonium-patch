@@ -1,136 +1,57 @@
-# Plutonium Network — `new/` build
+# Plutonium
 
-A full browser-style web platform: Chrome-style tabs with a built-in secure browsing,
-bookmarks & pins, plus the complete Plutonium Network feature set.
+> The unblocked games website made for YOU.
 
-This build started as the **crafted gamz** browser project, rebranded to
-**Plutonium Network**, with every feature backend replaced by Plutonium's own
-services and the Plutonium-only features (cloud gaming, streaming, Stelena AI,
-cloud-synced saves) added in.
+[![GitHub License](https://img.shields.io/github/license/Plutonium-Net/Plutonium)](https://github.com/Plutonium-Net/Plutonium)
+[![GitHub Stars](https://img.shields.io/github/stars/Plutonium-Net/Plutonium)](https://github.com/Plutonium-Net/Plutonium/stargazers)
+[![GitHub Issues](https://img.shields.io/github/issues/Plutonium-Net/Plutonium)](https://github.com/Plutonium-Net/Plutonium/issues)
 
-## Pages
+Plutonium is a web-based platform for games, browsing, media, and customization, built around a familiar browser-style interface.
 
-| Route (address bar) | File | What it is |
-| --- | --- | --- |
-| `pluto://games` | `js/workspaces.js` | Games — Local library + **Cloud** (Plutonium GCDN) with recently played & save sync |
-| `pluto://media` | `js/workspaces.js` | Media — movies / TV / anime, age gate, Videasy & VidCore players |
-| `pluto://ai` | `js/workspaces.js` | **Stelena** — Plutonium AI (Groq worker, streaming, voice + TTS) |
-| `pluto://vms` | `js/workspaces.js` | Cloud VMs (remote sessions via the Plutonium VM worker) |
-| `pluto://cloud` | `js/workspaces.js` | Cloud Gaming (cgapi worker: sessions, queue, WebRTC embed) |
-| `pluto://about` | `pages/about.html` | About, credits & the Plutonium services list |
+## Features
 
-## Backends (all Plutonium's own)
+* **Games**: Play games directly through Plutonium.
+* **Browser**: Browse the web from within Plutonium.
+* **Media**: Access media through the platform.
+* **Customization**: Customize themes and settings.
+* **Tabs**: Use a browser-style tabbed interface.
+* **Web-Based**: Runs directly in a modern web browser.
 
-| Service | Endpoint | Used by |
-| --- | --- | --- |
-| Accounts / Firestore gateway | `accounting.cdn.plutoniumnet.work` | `js/cloud-store.js` (auth, docs) |
-| Games CDN | `g.cdn.plutoniumnet.work` | `js/games.js` (catalog, thumbnails, save sync) |
-| AI (Groq gateway) | `ai.cdn.plutoniumnet.work/chat` | `js/ai.js` (Bearer idToken, SSE) |
-| VMs (remote sessions) | `vm.cdn.plutoniumnet.work/session` | `js/vms.js` (Bearer idToken) |
-| Cloud Gaming (cgapi) | `cgapi.cdn.plutoniumnet.work` | `js/cloud.js` (sessions / queue / embed) |
-| Streaming | TMDB + Videasy / VidCore players | `js/stream.js` |
-| Wisp relays (proxied browsing) | `wss://wisp-{us-east,us-west,europe,asia}.plutoniumnet.work` | `js/net.js` (UV / Scramjet engines) |
-| VanilliaPXY engine (proxied browsing) | `vanillia-{vercel,us-west,europe}.plutoniumnet.work/vanillia?url=` | `js/net.js` (fourth engine; serves its own service worker) |
+## Running Locally
 
-All worker calls that need it carry `Authorization: Bearer <Firebase idToken>`
-from `PlutoniumStore` — the AI and VM pages gate on sign-in.
+Plutonium must be served through a local web server. Opening `index.html` directly with `file://` is not supported.
 
-### Games CDN metadata (overview modal)
-
-Clicking a game card in `pluto://games` opens an overview modal (banner, title,
-description, controls, Play / Pin, cloud-sync status) instead of launching
-straight away. Its copy is read from the games CDN, per game id, from either
-source (the sidecar wins when both define a field):
-
-- inline on the game's `config.json` entry, in a `details` object holding
-  `description`, `controls`, `banner`, `cloudSync`, `tags`; or
-- a sidecar map at `https://g.cdn.plutoniumnet.work/details.json`:
-
-```json
-{
-  "basket-random": {
-    "description": "Two-player basketball…",
-    "controls": [
-      { "keys": "W A S D", "action": "Move" },
-      { "keys": "Space", "action": "Jump / shoot" }
-    ],
-    "banner": "banners/basket-random.png",
-    "cloudSync": true,
-    "tags": ["2 Player", "Sports"]
-  }
-}
-```
-
-`controls` also accepts a plain string or `"Key: Action"` lines. `cloudSync`
-(`true` / `false` / absent) drives the sync chip. Everything is optional, and a
-missing sidecar is ignored — the modal then shows the title, artwork and a
-"no description yet" note.
-
-`banner` is relative to the CDN root (or an absolute URL). When a game has no
-banner, `js/games.js` **generates one**: the key art is composed into a
-1200×400 strip — blurred ambient backdrop, the sharp artwork lifted on the
-right and the Plutonium wordmark on the left, tinted by the current accent — so
-every game gets proper hero art with nothing to publish. Generated banners are
-cached in memory per game + accent, and a broken CDN `banner` path falls back to
-the generated art (the CDN answers missing files with its own HTML page, so a
-typo would otherwise render as an empty hero).
-
-## Shared shell
-
-`index.html` is the browser: chrome tabs (`js/chrome-tabs.js`), toolbar with
-address bar (`js/net.js`, `js/url.js`, `js/navigation.js`),
-bookmarks bar (`js/bookmarks*.js`), home pins (`js/pins.js` — pinned games
-and a VM quick-launch, added from the Games/VMs pages), keyboard shortcuts
-(`js/keyboard.js`), panic/escape page (`js/escape.js`), loading screen
-(`js/loading.js`) and a new-tab page with
-the Plutonium logo, search, home pins (`js/main.js`), the engine switch and —
-directly beneath it — the relay (wisp) switcher (`js/net.js`), which is hidden
-whenever the Hyperbeam cloud engine is selected, and doubles as the VanilliaPXY
-server picker (`Vercel` / `US West` / `Europe`) when that engine is selected —
-the two sources have separate lists, stored choices and latency probes. Vercel
-fronts every region, so it is the default VanilliaPXY host: that pick skips both
-the IP lookup and the ping race, which only decide the wisp relay, and a manual
-pick is the one thing that overrides it.
-
-Workspace views are injected into the single `index.html` document by
-`js/workspaces.js`; `pluto://` URLs are resolved in `js/url.js`.
-
-## Theming & data
-
-- `js/theme-state.js` reads/writes `plu_theme` + `plu_settings`
-  (one-time migration from the old `cg_theme` / `cg_settings` keys).
-  Default accent is Plutonium pink `#e8175d`.
-- **Backgrounds** — `bg.html` + `js/bg.js` run the Plutonium background
-  engine (`bg/js/bg-init.js` + particles.js / Vanta.js): 13 animated effects
-  (particles, birds, fog, waves, clouds, globe, net, trunk, topology, dots,
-  rings, halo, none) tinted by the accent color, selected via the
-  `bgEffect` setting (mirrored to `plu_settings.bgStyle` for old-key
-  compatibility).
-- `js/account.js` — `window.accountManager` (PlutoniumStore-backed):
-  email/password + OAuth, bookmarks/pins/tabs cloud sync under
-  `bookmarks`, `pins`, `tabs` docs, with one-time migration of the old
-  `cg_bookmarks` / `cg_pins` / `cg_tabs` keys.
-- Games recently played live under `plu_games_data` and sync to
-  `games_data/saved`; per-game saves sync to `game_saves/{id}` via
-  `plu_sync_*` postMessage messages.
-- Ported Plutonium pages use `css/plu-tokens.css` (the Plutonium design
-  tokens) so the old Plutonium look is preserved inside the tab.
-
-## Remaining third-party dependencies (intentional)
-
-- IP geolocation: `ipapi.co` (`js/net.js`) — approximate location, used to pick
-  the nearest relay region (`getClosestRelayServer()`).
-
-## PWA
-
-The site is installable: `manifest.json` (with `img/icon-*.png` icons) plus
-`js/pwa.js`, which registers the root `sw.js` so Chrome offers the install
-prompt; Safari uses the manifest and `img/apple-touch-icon.png` via
-"Add to Home Screen", However, Plutonium does not support mobile devices.
-
-## Serving locally
+Clone the repository:
 
 ```bash
-npx http-server -p 8090 -a 127.0.0.1 -c-1
-# then open http://127.0.0.1:8090/new/
+git clone https://github.com/Plutonium-Net/Plutonium.git
+cd Plutonium
 ```
+
+Start a local web server. For example, with Python:
+
+```bash
+python3 -m http.server 8080
+```
+
+Then open:
+
+```text
+http://localhost:8080
+```
+
+## Contributing
+
+Contributions, improvements, and bug reports are welcome.
+
+Please test changes locally before submitting a pull request.
+
+## License
+
+See the [LICENSE](LICENSE) file for licensing information.
+
+---
+
+**Plutonium Network**
+
+[GitHub](https://github.com/Plutonium-Net) · [Repository](https://github.com/Plutonium-Net/Plutonium)
