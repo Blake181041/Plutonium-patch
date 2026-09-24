@@ -51,13 +51,27 @@ jobs:
         run: |
           set -euo pipefail
 
+          cp onboarding.html .ci-onboarding.html
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path(".ci-onboarding.html")
+          s = p.read_text()
+          old = "location.replace('index.html')"
+          new = "window.parent.postMessage({type:'plu-single-onboarding-done'},'*')"
+          if old not in s:
+              old = 'location.replace("index.html")'
+          if old not in s:
+              raise SystemExit("Could not find onboarding return navigation.")
+          p.write_text(s.replace(old, new))
+          PY
+
           python3 -m http.server 4173 --bind 127.0.0.1 >/tmp/plutonium-http.log 2>&1 &
           SERVER_PID=$!
-          trap 'kill $SERVER_PID 2>/dev/null || true' EXIT
+          trap 'kill $SERVER_PID 2>/dev/null || true; rm -f .ci-onboarding.html' EXIT
           sleep 1
 
           node node_modules/single-file-cli/single-file-node.js \
-            http://127.0.0.1:4173/onboarding.html \
+            http://127.0.0.1:4173/.ci-onboarding.html \
             dist-single/onboarding-embedded.html \
             --browser-executable-path="$PLUTONIUM_BROWSER" \
             --browser-arg="--no-sandbox" \
@@ -70,28 +84,16 @@ jobs:
           const onboardingPath = 'dist-single/onboarding-embedded.html';
 
           let main = fs.readFileSync(mainPath, 'utf8');
-          let onboarding = fs.readFileSync(onboardingPath, 'utf8');
-
-          const returnPattern = /location\.replace\(\s*(['"])index\.html\1\s*\)/g;
-          const returnReplacement = 'window.parent.postMessage({type:"plu-single-onboarding-done"},"*")';
-
-          if (!returnPattern.test(onboarding)) {
-            throw new Error('Could not find onboarding return navigation in embedded onboarding build.');
-          }
-
-          onboarding = onboarding.replace(returnPattern, returnReplacement);
-
+          const onboarding = fs.readFileSync(onboardingPath, 'utf8');
           const onboardingB64 = Buffer.from(onboarding, 'utf8').toString('base64');
 
-          const redirectPattern = /location\.replace\(\s*(['"])onboarding\.html\1\s*\)/g;
+          const redirectPattern = /location\\.replace\\(\\s*(['"])onboarding\\.html\\1\\s*\\)/g;
+
           if (!redirectPattern.test(main)) {
             throw new Error('Could not find onboarding redirect in generated Single-File HTML.');
           }
 
-          main = main.replace(
-            redirectPattern,
-            'window.__pluOpenEmbeddedOnboarding()'
-          );
+          main = main.replace(redirectPattern, 'window.__pluOpenEmbeddedOnboarding()');
 
           const bridge = [
             '<script>',
@@ -115,12 +117,32 @@ jobs:
             '})();',
             '</script>'
           ].join('');
-          
-          main = main.replace('</head>', bridge + '</head>');
 
+          main = main.replace('</head>', bridge + '</head>');
           fs.writeFileSync(mainPath, main);
           fs.unlinkSync(onboardingPath);
           NODE
+
+      - name: Validate build outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s dist-single/plutonium.html
+          test -s dist-single/plutonium.svg
+          grep -q '<!DOCTYPE html\|<html' dist-single/plutonium.html
+          grep -q '<svg' dist-single/plutonium.svg
+          if grep -q 'onboarding.html' dist-single/plutonium.html; then
+            echo 'ERROR: generated Single-File HTML still contains a direct onboarding.html redirect.'
+            exit 1
+          fi
+          if ! grep -q '__pluOpenEmbeddedOnboarding' dist-single/plutonium.html; then
+            echo 'ERROR: embedded onboarding bridge was not injected.'
+            exit 1
+          fi
+          printf 'HTML: '
+          du -h dist-single/plutonium.html | cut -f1
+          printf 'SVG:  '
+          du -h dist-single/plutonium.svg | cut -f1
 
       - name: Validate build outputs
         shell: bash
