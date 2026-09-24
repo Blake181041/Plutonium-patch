@@ -36,10 +36,12 @@ jobs:
         run: npm install
 
       - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Set Chromium path
         shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium
+          echo "PLUTONIUM_BROWSER=$(node -e "console.log(require('playwright').chromium.executablePath())")" >> "$GITHUB_ENV"
 
       - name: Build Single-File HTML
         run: npm run build:single
