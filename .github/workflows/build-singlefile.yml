@@ -36,35 +36,31 @@ jobs:
         run: |
           python3 -m http.server 4173 --bind 127.0.0.1 >/tmp/plutonium-http.log 2>&1 &
           echo $! >/tmp/plutonium-http.pid
-          curl --retry 20 --retry-delay 1 --retry-connrefused --fail http://127.0.0.1:4173/ >/dev/null
+          curl --retry 20 --retry-delay 1 --retry-connrefused --fail http://127.0.0.1:4173/index.html >/dev/null
 
       - name: Build single-file HTML
         shell: bash
         run: |
-          mkdir -p dist
-          npx --yes single-file-cli@2.0.75 \
-            http://127.0.0.1:4173/index.html \
-            dist/plutonium-singlefile.html \
-            --browser-wait-until=load \
-            --browser-wait-until-delay=4000 \
-            --browser-load-max-time=60000 \
-            --browser-capture-max-time=60000 \
-            --block-scripts=false \
-            --block-fonts=false \
-            --block-images=false \
-            --block-audios=false \
-            --block-videos=false \
-            --remove-frames=false \
-            --remove-hidden-elements=false \
-            --remove-unused-styles=false \
-            --remove-unused-fonts=false \
-            --remove-alternative-fonts=false \
-            --remove-alternative-images=false \
-            --remove-alternative-medias=false \
-            --load-deferred-images=true \
-            --compress-HTML=true \
-            --self-extracting-archive=false \
-            --filename-conflict-action=overwrite
+          set -euo pipefail
+          mkdir -p dist .singlefile-cli
+          cd .singlefile-cli
+          npm init -y >/dev/null 2>&1
+          npm install --no-save single-file-cli@2.0.83 simple-cdp@1.8.6 >/dev/null 2>&1
+          cd ..
+
+          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          echo "Browser: $BROWSER"
+          node -v
+          node .singlefile-cli/node_modules/single-file-cli/single-file-cli.js --version
+
+          node .singlefile-cli/node_modules/single-file-cli/single-file-cli.js             http://127.0.0.1:4173/index.html             dist/plutonium-singlefile.html             --browser-executable-path="$BROWSER"             --browser-args='["--no-sandbox","--disable-dev-shm-usage"]'             --browser-wait-until=load             --browser-wait-until-delay=4000             --browser-load-max-time=60000             --browser-capture-max-time=60000             --block-scripts=false             --block-fonts=false             --block-images=false             --block-audios=false             --block-videos=false             --remove-frames=false             --remove-hidden-elements=false             --remove-unused-styles=false             --remove-unused-fonts=false             --remove-alternative-fonts=false             --remove-alternative-images=false             --remove-alternative-medias=false             --load-deferred-images=true             --compress-HTML=true             --self-extracting-archive=false             --filename-conflict-action=overwrite
+
+          if [ ! -s dist/plutonium-singlefile.html ]; then
+            echo "SingleFile did not create the output file."
+            echo "HTTP server log:"
+            cat /tmp/plutonium-http.log || true
+            exit 1
+          fi
 
       - name: Build SVG wrapper containing the HTML
         shell: bash
@@ -121,5 +117,5 @@ jobs:
             echo "Generated files are already up to date."
             exit 0
           fi
-          git commit -m "build: update Plutonium single-file outputs [skip ci]"
+          git commit -m "build: fix SingleFile browser connection [skip ci]"
           git push
