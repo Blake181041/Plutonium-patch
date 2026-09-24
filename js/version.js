@@ -68,4 +68,21 @@
     }
     if (stored === null || parseInt(stored, 10) < current) showModal();
   });
+
+  /*
+   * Build floor from the global config.
+   *
+   * The service-worker check above only notices a new build once the worker has
+   * already updated. This one lets an operator force every client below a
+   * chosen build to reload, which is the "you must update" kill switch. It
+   * reuses the same modal, and never stacks a second copy on top.
+   */
+  function checkMinBuild() {
+    if (!window.PlutoniumConfig) return;
+    var min = PlutoniumConfig.get().rollout.minBuild || 0;
+    if (min > current && !document.getElementById('update-banner')) showModal();
+  }
+
+  checkMinBuild();
+  if (window.PlutoniumConfig) PlutoniumConfig.onChange(checkMinBuild);
 })();

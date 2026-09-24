@@ -221,6 +221,21 @@ async function navigate(url) {
 
   const local = resolvePluUrl(full)
   if (local) {
+    // Global kill switch. The console can disable a whole page at runtime, so
+    // check here rather than only hiding the tile: a bookmark, a pin, or a
+    // restored tab must not be able to open a disabled page.
+    if (window.PlutoniumConfig && typeof PlutoniumConfig.pageAllowed === 'function'
+        && !PlutoniumConfig.pageAllowed(local.key)) {
+      const mapped = PlutoniumConfig.pageFeatures ? PlutoniumConfig.pageFeatures[local.key] : null
+      const message = mapped ? PlutoniumConfig.noticeFor(mapped) : 'That feature is temporarily unavailable.'
+      if (window.PlutoniumNotices && typeof PlutoniumNotices.toast === 'function') {
+        PlutoniumNotices.toast(message)
+      } else {
+        console.warn('[gates]', message)
+      }
+      return
+    }
+
     if (typeof endRemoteSession === 'function') endRemoteSession()
     await activateLocal(local, getActiveTab())
     return

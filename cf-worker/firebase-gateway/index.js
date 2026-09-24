@@ -236,7 +236,23 @@ async function handleAccountDelete(request, env, allowed) {
     uid = (lookup.users && lookup.users[0] && lookup.users[0].localId) || null;
   } catch (_) {}
 
-  const upstream = await fetch(
+  if (!uid) return corsResponse({ error: 'Could not verify account' }, 401, allowed);
+
+  // Purge BEFORE deleting the auth user. Once accounts:delete succeeds this
+  // idToken is dead, so every purge request afterwards would 401 and the
+  // whole data removal would silently do nothing.
+  let purge;
+  try {
+    purge = await deleteUserFirestoreData(env, uid, idToken);
+  } catch (err) {
+    console.error('[firebase-gateway] purge failed for', uid, err);
+    return corsResponse({
+      error: 'Account not deleted: your cloud data could not be removed, so nothing was deleted. Please try again.',
+      detail: String((err && err.message) || err),
+    }, 502, allowed);
+  }
+
+  const delRes = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:delete?key=${env.FIREBASE_API_KEY}`,
     {
       method: 'POST',
@@ -245,11 +261,20 @@ async function handleAccountDelete(request, env, allowed) {
     }
   );
 
-  const data = await upstream.json();
-  if (!upstream.ok) return corsResponse(data, upstream.status, allowed);
+  const data = await delRes.json();
+  if (!delRes.ok) return corsResponse(data, delRes.status, allowed);
 
-  if (uid) await deleteUserFirestoreData(env, uid);
-  return corsResponse({ deleted: true }, 200, allowed);
+  if (purge.errors.length) {
+    console.error('[firebase-gateway] partial purge for', uid, purge.errors);
+    return corsResponse({
+      deleted:   true,
+      partial:   true,
+      removed:   purge.removed,
+      errors:    purge.errors,
+    }, 200, allowed);
+  }
+
+  return corsResponse({ deleted: true, removed: purge.removed }, 200, allowed);
 }
 
 async function handlePasswordChange(request, env, allowed) {
@@ -344,43 +369,130 @@ async function handleLinkProvider(request, env, allowed) {
 
 const FIRESTORE_BASE = env => `https://firestore.googleapis.com/v1/projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents`;
 
-async function deleteFirestoreDoc(env, docPath) {
-  try {
-    await fetch(`${FIRESTORE_BASE(env)}${docPath}`, { method: 'DELETE' });
-  } catch (_) {}
+/**
+ * The canonical list of per-user Firestore documents.
+ *
+ * IMPORTANT: the admin console keeps a mirror of this list. The console now
+ * lives in its own repository (as `registry.js`), so this list can no longer be
+ * checked against it automatically — if you add a collection to PlutoniumStore,
+ * update BOTH or the console will mislabel it and fail to purge it.
+ */
+export const USER_FIRESTORE_DOCS = [
+  '/users/{uid}',
+  '/users/{uid}/bookmarks/_default',
+  '/users/{uid}/history/_default',
+  '/users/{uid}/pins/_default',
+  '/users/{uid}/settings/_default',
+  '/users/{uid}/tabs/_default',
+  '/users/{uid}/recent/_default',
+  '/users/{uid}/notices/_default',
+  '/users/{uid}/ai_chats/_default',
+  '/users/{uid}/ai_memory/_default',
+  '/users/{uid}/ai_personas/_default',
+  '/users/{uid}/nav_prefs/_default',
+  '/users/{uid}/stream_favorites/_default',
+  '/users/{uid}/stream_continue/_default',
+  '/users/{uid}/stream_prefs/_default',
+  '/users/{uid}/games_data/saved',
+  '/users/{uid}/personal_games/meta',
+  '/users/{uid}/profile_photo/_default',
+];
+
+/** Sub-collections that hold one document per id and must be walked. */
+export const USER_FIRESTORE_COLLECTIONS = [
+  'game_saves',
+  'personal_games',
+  'games_data',
+  'pg_files',
+];
+
+const FIRESTORE_DOCS_API = 'https://firestore.googleapis.com/v1/';
+
+/** Requests are authenticated with the caller's own Firebase ID token. */
+function purgeHeaders(idToken) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (idToken) headers.Authorization = `Bearer ${idToken}`;
+  return headers;
 }
 
-async function deleteFirestoreCollection(env, collectionPath) {
-  try {
-    const res = await fetch(`${FIRESTORE_BASE(env)}/${collectionPath}?pageSize=300`);
-    if (!res.ok) return;
+/** Delete one document by absolute REST resource name. 404 counts as success. */
+async function deleteFirestoreResource(resourceName, idToken) {
+  const res = await fetch(`${FIRESTORE_DOCS_API}${resourceName}`, {
+    method:  'DELETE',
+    headers: purgeHeaders(idToken),
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`DELETE ${resourceName} -> HTTP ${res.status}`);
+  }
+}
+
+/** Delete one document by path relative to the documents root. */
+async function deleteFirestoreDoc(env, docPath, idToken) {
+  await deleteFirestoreResource(docPath.replace(/^\//, `projects/${env.FIREBASE_PROJECT_ID}/databases/(default)/documents/`), idToken);
+}
+
+/**
+ * Delete every document in a collection, one page at a time.
+ * The old implementation fetched a single page of 300 and stopped, so any
+ * collection larger than that was only partially purged.
+ */
+async function deleteFirestoreCollection(env, collectionPath, idToken, errors) {
+  const base = `${FIRESTORE_BASE(env)}/${collectionPath.replace(/^\//, '')}`;
+  let pageToken = '';
+  let removed   = 0;
+
+  // Bounded loop: a server bug must not spin forever deleting documents.
+  for (let page = 0; page < 500; page++) {
+    const url = new URL(base);
+    url.searchParams.set('pageSize', '300');
+    if (pageToken) url.searchParams.set('pageToken', pageToken);
+
+    const res = await fetch(url.toString(), { headers: purgeHeaders(idToken) });
+    if (res.status === 404) return removed;
+    if (!res.ok) throw new Error(`LIST ${collectionPath} -> HTTP ${res.status}`);
+
     const data = await res.json();
     for (const doc of (data.documents || [])) {
-      try { await fetch(doc.name, { method: 'DELETE' }); } catch (_) {}
+      try {
+        await deleteFirestoreResource(doc.name, idToken);
+        removed++;
+      } catch (err) {
+        errors.push(String((err && err.message) || err));
+      }
     }
-  } catch (_) {}
+
+    pageToken = data.nextPageToken || '';
+    if (!pageToken) break;
+  }
+
+  return removed;
 }
 
-async function deleteUserFirestoreData(env, uid) {
-  const fixed = [
-    `/users/${uid}`,
-    `/users/${uid}/bookmarks/_default`,
-    `/users/${uid}/pins/_default`,
-    `/users/${uid}/settings/_default`,
-    `/users/${uid}/tabs/_default`,
-    `/users/${uid}/recent/_default`,
-    `/users/${uid}/ai_chats/_default`,
-    `/users/${uid}/stream_favorites/_default`,
-    `/users/${uid}/stream_continue/_default`,
-    `/users/${uid}/stream_prefs/_default`,
-    `/users/${uid}/games_data/saved`,
-    `/users/${uid}/personal_games/meta`,
-    `/users/${uid}/profile_photo/_default`,
-  ];
-  for (const p of fixed) await deleteFirestoreDoc(env, p);
-  for (const col of ['game_saves', 'personal_games', 'games_data']) {
-    await deleteFirestoreCollection(env, `users/${uid}/${col}`);
+/**
+ * Remove every Firestore document belonging to a user.
+ *
+ * Throws if a listing/page fails outright (so the caller can refuse to report
+ * a successful deletion). Per-document failures are collected in `errors`.
+ */
+async function deleteUserFirestoreData(env, uid, idToken) {
+  const errors  = [];
+  let   removed = 0;
+
+  for (const template of USER_FIRESTORE_DOCS) {
+    const path = template.replace('{uid}', uid);
+    try {
+      await deleteFirestoreDoc(env, path, idToken);
+      removed++;
+    } catch (err) {
+      errors.push(String((err && err.message) || err));
+    }
   }
+
+  for (const col of USER_FIRESTORE_COLLECTIONS) {
+    removed += await deleteFirestoreCollection(env, `users/${uid}/${col}`, idToken, errors);
+  }
+
+  return { removed, errors };
 }
 
 async function handleOAuthStart(request, env, url) {

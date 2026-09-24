@@ -33,6 +33,11 @@
   updateClock();
   setInterval(updateClock, 10000);
 
+  /*
+   * The in-repo changelog is the evergreen copy: it ships with the site and is
+   * reviewed in pull requests. Live announcements from the admin console are
+   * layered on top of it, so an operator can push a notice without a deploy.
+   */
   function loadNews () {
     return fetch('data/news.json')
       .then(function (r) { return r.json(); })
@@ -45,6 +50,29 @@
         });
       })
       .catch(function () { return []; });
+  }
+
+  function liveNotices () {
+    try {
+      if (window.PlutoniumNotices && typeof PlutoniumNotices.tickerItems === 'function') {
+        return PlutoniumNotices.tickerItems();
+      }
+    } catch (err) { /* the ticker must never fail because of the control plane */ }
+    return [];
+  }
+
+  /* Merge live notices ahead of the changelog, de-duplicated by title. */
+  function mergeStories (sections) {
+    var live = liveNotices();
+    if (!live.length) return sections;
+    var seen = {};
+    var merged = live.concat(sections[0] || []).filter(function (story) {
+      var key = (story.title || '').toLowerCase();
+      if (!key || seen[key]) return false;
+      seen[key] = true;
+      return true;
+    });
+    return [merged].concat(sections.slice(1));
   }
 
   function showStory (artIdx) {
@@ -91,7 +119,7 @@
     return dotsEl.querySelectorAll('.news-dot');
   }
 
-  loadNews().then(function (sections) {
+  function begin (sections) {
     if (!sections.length || !sections[0].length) return;
     articles = sections[0];
     dots = buildDots(articles.length);
@@ -107,5 +135,19 @@
     });
 
     startRotation();
+  }
+
+  loadNews().then(function (sections) {
+    var merged = mergeStories(sections);
+    begin(merged);
+
+    // Notices arrive on their own schedule; refresh the strip when they do.
+    if (window.PlutoniumNotices && typeof PlutoniumNotices.loadFeed === 'function') {
+      PlutoniumNotices.loadFeed(false).then(function () {
+        var updated = mergeStories(sections);
+        if (!updated.length || !updated[0].length) return;
+        if (updated[0].length !== articles.length) begin(updated);
+      }).catch(function () {});
+    }
   });
 })();
