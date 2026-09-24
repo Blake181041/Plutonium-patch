@@ -31,6 +31,12 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install Chromium
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium
+
       - name: Start local Plutonium server
         shell: bash
         run: |
@@ -48,7 +54,11 @@ jobs:
           npm install --no-save single-file-cli@2.0.83 simple-cdp@1.8.6 >/dev/null 2>&1
           cd ..
 
-          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          BROWSER="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$BROWSER" ]; then
+            echo "Chromium was not found."
+            exit 1
+          fi
           echo "Browser: $BROWSER"
           node -v
           node .singlefile-cli/node_modules/single-file-cli/single-file-cli.js --version
