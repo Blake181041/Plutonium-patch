@@ -132,7 +132,7 @@ try {
   await run(
     process.execPath,
     [
-      path.join(root, "node_modules", "single-file-cli", "single-file-cli.js"),
+      path.join(root, "node_modules", "single-file-cli", "single-file-node.js"),
       `http://127.0.0.1:${port}/index.html`,
       outputHtml,
       `--browser-executable-path=${browser}`,
