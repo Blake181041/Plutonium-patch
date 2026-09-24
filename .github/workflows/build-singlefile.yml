@@ -1,0 +1,128 @@
+name: Build Plutonium single-file
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "dist/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: plutonium-singlefile
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Start local Plutonium server
+        shell: bash
+        run: |
+          python3 -m http.server 4173 --bind 127.0.0.1 >/tmp/plutonium-http.log 2>&1 &
+          echo $! >/tmp/plutonium-http.pid
+          curl --retry 20 --retry-delay 1 --retry-connrefused --fail http://127.0.0.1:4173/ >/dev/null
+
+      - name: Build single-file HTML
+        shell: bash
+        run: |
+          mkdir -p dist
+          npx --yes single-file-cli@2.0.75 \
+            http://127.0.0.1:4173/index.html \
+            dist/plutonium-singlefile.html \
+            --browser-engine=chromium \
+            --browser-wait-until=load \
+            --browser-wait-until-delay=4000 \
+            --browser-load-max-time=60000 \
+            --browser-capture-max-time=60000 \
+            --browser-bypass-csp=true \
+            --block-scripts=false \
+            --block-stylesheets=false \
+            --block-fonts=false \
+            --block-images=false \
+            --block-audios=false \
+            --block-videos=false \
+            --remove-frames=false \
+            --remove-hidden-elements=false \
+            --remove-unused-styles=false \
+            --remove-unused-fonts=false \
+            --remove-alternative-fonts=false \
+            --remove-alternative-images=false \
+            --remove-alternative-medias=false \
+            --load-deferred-content=true \
+            --compress-html=true \
+            --self-extracting-archive=false \
+            --filename-conflict-action=overwrite
+
+      - name: Build SVG wrapper containing the HTML
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+
+          const input = "dist/plutonium-singlefile.html";
+          const output = "dist/plutonium.svg";
+          const html = fs.readFileSync(input);
+          const encoded = html.toString("base64");
+
+          const svg = [
+            '<?xml version="1.0" encoding="UTF-8"?>',
+            '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xhtml="http://www.w3.org/1999/xhtml" width="100%" height="100%" viewBox="0 0 1280 720">',
+            '<title>Plutonium Network</title>',
+            '<desc>Standalone SVG wrapper containing the generated Plutonium single-file HTML.</desc>',
+            '<foreignObject x="0" y="0" width="1280" height="720">',
+            '<xhtml:iframe src="data:text/html;base64,' + encoded + '" width="1280" height="720" frameborder="0" style="width:100%;height:100%;border:0;display:block;background:#111"></xhtml:iframe>',
+            '</foreignObject>',
+            '</svg>'
+          ].join("\n");
+
+          fs.writeFileSync(output, svg);
+          NODE
+
+      - name: Validate build outputs
+        shell: bash
+        run: |
+          test -s dist/plutonium-singlefile.html
+          test -s dist/plutonium.svg
+          grep -q '<!DOCTYPE html\|<html' dist/plutonium-singlefile.html
+          grep -q '<svg' dist/plutonium.svg
+          printf 'HTML: '
+          du -h dist/plutonium-singlefile.html | cut -f1
+          printf 'SVG:  '
+          du -h dist/plutonium.svg | cut -f1
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plutonium-singlefile
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit generated files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add dist/plutonium-singlefile.html dist/plutonium.svg
+          if git diff --cached --quiet; then
+            echo "Generated files are already up to date."
+            exit 0
+          fi
+          git commit -m "build: update Plutonium single-file outputs [skip ci]"
+          git push
