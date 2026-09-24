@@ -45,14 +45,12 @@ jobs:
           npx --yes single-file-cli@2.0.75 \
             http://127.0.0.1:4173/index.html \
             dist/plutonium-singlefile.html \
-            --browser-engine=chromium \
             --browser-wait-until=load \
             --browser-wait-until-delay=4000 \
             --browser-load-max-time=60000 \
             --browser-capture-max-time=60000 \
             --browser-bypass-csp=true \
             --block-scripts=false \
-            --block-stylesheets=false \
             --block-fonts=false \
             --block-images=false \
             --block-audios=false \
