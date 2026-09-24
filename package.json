@@ -1,0 +1,10 @@
+{
+  "name": "plutonium-patch",
+  "private": true,
+  "scripts": {
+    "build:single": "node tools/build-single.mjs"
+  },
+  "dependencies": {
+    "single-file-cli": "2.0.83"
+  }
+}
