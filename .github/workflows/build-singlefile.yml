@@ -49,7 +49,6 @@ jobs:
             --browser-wait-until-delay=4000 \
             --browser-load-max-time=60000 \
             --browser-capture-max-time=60000 \
-            --browser-bypass-csp=true \
             --block-scripts=false \
             --block-fonts=false \
             --block-images=false \
@@ -62,8 +61,8 @@ jobs:
             --remove-alternative-fonts=false \
             --remove-alternative-images=false \
             --remove-alternative-medias=false \
-            --load-deferred-content=true \
-            --compress-html=true \
+            --load-deferred-images=true \
+            --compress-HTML=true \
             --self-extracting-archive=false \
             --filename-conflict-action=overwrite
 
